@@ -1,0 +1,72 @@
+# Terraform
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform/
+.terraform.lock.hcl
+crash.log
+crash.*.log
+*.tfplan
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.iml
+
+# Build artifacts
+backend/target/
+backend/.classpath
+backend/.project
+backend/.settings/
+backend/bin/
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+frontend/.parcel-cache/
+
+# Logs
+*.log
+logs/
+
+# Dependencies
+.m2/
+node_modules/
+package-lock.json
+pom.xml.tag
+pom.xml.releaseBackup
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temp files
+*.tmp
+*.bak
+*.swp
+*~
+
+# Test coverage
+coverage/
+.coverage
+*.cover
+
+# Docker
+.dockerignore
+docker-compose.override.yml
+
+# GCP
+.gcloud/
+credentials.json
+
+# GitHub
+.github/workflows/*.log

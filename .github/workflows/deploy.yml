@@ -1,0 +1,296 @@
+name: Deploy to GCP
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to (staging/production)'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  GCP_REGION: asia-south1
+  ARTIFACT_REGISTRY: interviewiq-docker
+
+jobs:
+  build-and-push-backend:
+    name: Build and Push Backend Docker Image
+    runs-on: ubuntu-latest
+    outputs:
+      image-digest: ${{ steps.docker-build.outputs.digest }}
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Configure Docker authentication
+        run: |
+          gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev
+
+      - name: Determine image tag
+        id: image-tag
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            ENV="${{ github.event.inputs.environment }}"
+          else
+            ENV="staging"
+          fi
+          TAG="${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.ARTIFACT_REGISTRY }}/backend:${ENV}-${GITHUB_SHA:0:8}"
+          echo "image-tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "environment=${ENV}" >> $GITHUB_OUTPUT
+
+      - name: Build and push backend Docker image
+        id: docker-build
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ${{ steps.image-tag.outputs.image-tag }}
+            ${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.ARTIFACT_REGISTRY }}/backend:${{ steps.image-tag.outputs.environment }}-latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  build-and-push-frontend:
+    name: Build and Push Frontend to GCS
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: ./frontend
+
+      - name: Build frontend
+        run: npm run build
+        working-directory: ./frontend
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+
+      - name: Determine environment and bucket
+        id: env-bucket
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            ENV="${{ github.event.inputs.environment }}"
+          else
+            ENV="staging"
+          fi
+          BUCKET="interviewiq-${ENV}-frontend"
+          echo "environment=${ENV}" >> $GITHUB_OUTPUT
+          echo "bucket=${BUCKET}" >> $GITHUB_OUTPUT
+
+      - name: Upload frontend build to GCS
+        run: |
+          gsutil -m -h "Cache-Control:public, max-age=3600" cp -r frontend/build/* gs://${{ steps.env-bucket.outputs.bucket }}/
+          gsutil -h "Cache-Control:no-cache, no-store, must-revalidate" -h "Content-Type:text/html" cp frontend/build/index.html gs://${{ steps.env-bucket.outputs.bucket }}/index.html
+
+  deploy-backend:
+    name: Deploy Backend to Cloud Run
+    needs: build-and-push-backend
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+
+      - name: Determine environment and service name
+        id: cloud-run-service
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            ENV="${{ github.event.inputs.environment }}"
+          else
+            ENV="staging"
+          fi
+          SERVICE="interviewiq-backend-${ENV}"
+          IMAGE="${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.ARTIFACT_REGISTRY }}/backend:${ENV}-latest"
+          echo "service-name=${SERVICE}" >> $GITHUB_OUTPUT
+          echo "image=${IMAGE}" >> $GITHUB_OUTPUT
+          echo "environment=${ENV}" >> $GITHUB_OUTPUT
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy ${{ steps.cloud-run-service.outputs.service-name }} \
+            --image ${{ steps.cloud-run-service.outputs.image }} \
+            --region ${{ env.GCP_REGION }} \
+            --platform managed \
+            --allow-unauthenticated \
+            --project ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Get Cloud Run service URL
+        run: |
+          gcloud run services describe ${{ steps.cloud-run-service.outputs.service-name }} \
+            --region ${{ env.GCP_REGION }} \
+            --platform managed \
+            --format='value(status.url)' \
+            --project ${{ secrets.GCP_PROJECT_ID }}
+
+  deploy-infrastructure:
+    name: Deploy Infrastructure with Terraform
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.0
+
+      - name: Determine environment
+        id: environment
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            ENV="${{ github.event.inputs.environment }}"
+          else
+            ENV="staging"
+          fi
+          echo "environment=${ENV}" >> $GITHUB_OUTPUT
+
+      - name: Terraform Init
+        working-directory: ./terraform/envs/${{ steps.environment.outputs.environment }}
+        run: terraform init
+
+      - name: Terraform Plan
+        id: plan
+        working-directory: ./terraform/envs/${{ steps.environment.outputs.environment }}
+        run: terraform plan -out=tfplan
+        continue-on-error: true
+
+      - name: Comment PR on Plan Failure
+        if: steps.plan.outcome == 'failure' && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: 'Terraform plan failed. Please review the logs.'
+            })
+
+      - name: Terraform Apply
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        working-directory: ./terraform/envs/${{ steps.environment.outputs.environment }}
+        run: terraform apply tfplan
+
+      - name: Upload Terraform Plan
+        uses: actions/upload-artifact@v3
+        with:
+          name: tfplan-${{ steps.environment.outputs.environment }}
+          path: terraform/envs/${{ steps.environment.outputs.environment }}/tfplan
+
+  smoke-tests:
+    name: Run Smoke Tests
+    needs: [deploy-backend, build-and-push-frontend]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+
+      - name: Get Cloud Run service URL
+        id: service-url
+        run: |
+          SERVICE="interviewiq-backend-staging"
+          URL=$(gcloud run services describe ${SERVICE} \
+            --region ${{ env.GCP_REGION }} \
+            --platform managed \
+            --format='value(status.url)' \
+            --project ${{ secrets.GCP_PROJECT_ID }})
+          echo "url=${URL}" >> $GITHUB_OUTPUT
+
+      - name: Health check
+        run: |
+          curl -X GET "${{ steps.service-url.outputs.url }}/actuator/health" \
+            -H "Content-Type: application/json" \
+            -w "\nHTTP Status: %{http_code}\n" || echo "Health check failed"
+        timeout-minutes: 2
+
+      - name: API health endpoint check
+        run: |
+          curl -X GET "${{ steps.service-url.outputs.url }}/api/health" \
+            -H "Content-Type: application/json" \
+            -w "\nHTTP Status: %{http_code}\n" || true
+        continue-on-error: true

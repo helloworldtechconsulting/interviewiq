@@ -1,0 +1,111 @@
+spring:
+  application:
+    name: interviewiq-backend
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+        use_sql_comments: true
+
+  datasource:
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 30000
+
+  mail:
+    host: ${SMTP_HOST:smtp.gmail.com}
+    port: ${SMTP_PORT:587}
+    username: ${SMTP_USERNAME}
+    password: ${SMTP_PASSWORD}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            required: true
+          connectiontimeout: 10000
+          timeout: 10000
+          writetimeout: 10000
+
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    default-property-inclusion: non_null
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${JWT_ISSUER_URI:https://accounts.google.com}
+          jwk-set-uri: ${JWT_JWK_SET_URI:https://www.googleapis.com/oauth2/v3/certs}
+
+server:
+  port: ${SERVER_PORT:8080}
+  servlet:
+    context-path: /api/v1
+  error:
+    include-message: always
+    include-binding-errors: always
+
+logging:
+  level:
+    root: INFO
+    com.interviewiq: DEBUG
+    org.springframework.security: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %logger{36} - %msg%n"
+
+# Application specific config
+app:
+  name: InterviewIQ
+  jwt:
+    secret: ${JWT_SECRET}
+    expiry-minutes: 60
+    refresh-expiry-days: 7
+    algorithm: RS256
+    issuer: ${JWT_ISSUER:interviewiq}
+
+  oauth2:
+    google:
+      client-id: ${GOOGLE_CLIENT_ID}
+      client-secret: ${GOOGLE_CLIENT_SECRET}
+
+  gcs:
+    project-id: ${GCS_PROJECT_ID}
+    bucket-name: ${GCS_BUCKET_NAME}
+    credentials-path: ${GCS_CREDENTIALS_PATH:/credentials/gcs-key.json}
+
+  openai:
+    api-key: ${OPENAI_API_KEY}
+    model: gpt-4o
+    temperature: 0.7
+    max-tokens: 2000
+
+  razorpay:
+    key-id: ${RAZORPAY_KEY_ID}
+    key-secret: ${RAZORPAY_KEY_SECRET}
+    webhook-secret: ${RAZORPAY_WEBHOOK_SECRET}
+
+  interview:
+    invite-token-expiry-hours: 72
+    cost-per-interview-paise: 10000
+    max-questions: 12
+    min-questions: 8
+
+  email:
+    from: ${EMAIL_FROM:noreply@interviewiq.com}
+    sender-name: InterviewIQ
+    base-url: ${FRONTEND_URL:https://app.interviewiq.com}
+
+springdoc:
+  api-docs:
+    path: /docs/api-docs
+  swagger-ui:
+    path: /docs/swagger-ui.html
+    enabled: true

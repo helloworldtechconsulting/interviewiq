@@ -1,0 +1,79 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: interviewiq-postgres
+    environment:
+      POSTGRES_DB: interviewiq
+      POSTGRES_USER: interviewiq
+      POSTGRES_PASSWORD: localdev123
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U interviewiq"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - interviewiq-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: interviewiq-backend
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/interviewiq
+      SPRING_DATASOURCE_USERNAME: interviewiq
+      SPRING_DATASOURCE_PASSWORD: localdev123
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      GCS_BUCKET_NAME: interviewiq-dev-data
+      JWT_SECRET: local-dev-jwt-secret-key-that-is-long-enough-for-testing
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET}
+      RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET}
+      GOOGLE_CLOUD_PROJECT: ${GCP_PROJECT_ID}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - interviewiq-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: interviewiq-frontend
+    ports:
+      - "3000:80"
+    environment:
+      REACT_APP_API_URL: http://localhost:8080/api
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - interviewiq-network
+
+volumes:
+  pgdata:
+    driver: local
+
+networks:
+  interviewiq-network:
+    driver: bridge

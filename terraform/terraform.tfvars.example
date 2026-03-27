@@ -1,0 +1,45 @@
+gcp_project_id = "your-gcp-project-id"
+gcp_region     = "asia-south1"
+environment    = "staging"
+
+# VPC Configuration
+vpc_cidr    = "10.0.0.0/16"
+subnet_cidr = "10.0.1.0/24"
+
+# Cloud SQL Configuration
+database_instance_name = "interviewiq-postgres-staging"
+database_name          = "interviewiq"
+database_user          = "interviewiq"
+db_password            = "CHANGE_ME_TO_STRONG_PASSWORD"
+instance_tier          = "db-f1-micro"
+availability_type      = "ZONAL"
+backup_retention_days  = 7
+
+# Storage Configuration
+data_bucket_name     = "interviewiq-staging-data"
+frontend_bucket_name = "interviewiq-staging-frontend"
+
+# Secrets Configuration
+openai_api_key            = "sk-YOUR_OPENAI_KEY_HERE"
+razorpay_key_id           = "rzp_test_YOUR_KEY_HERE"
+razorpay_key_secret       = "YOUR_RAZORPAY_SECRET_HERE"
+razorpay_webhook_secret   = "YOUR_WEBHOOK_SECRET_HERE"
+jwt_secret                = "your-256-bit-base64-encoded-secret-key-change-in-production"
+
+# Cloud Run Configuration
+cloud_run_service_name = "interviewiq-backend"
+backend_image_url      = "asia-south1-docker.pkg.dev/your-project-id/interviewiq-docker/backend:latest"
+container_port         = 8080
+cloud_run_cpu          = "1"
+cloud_run_memory       = "1Gi"
+cloud_run_min_instances = 1
+cloud_run_max_instances = 10
+
+# Artifact Registry Configuration
+artifact_registry_repository = "interviewiq-docker"
+
+# Monitoring Configuration
+notification_email_address = "devops@example.com"
+alert_cpu_threshold        = 80
+alert_5xx_error_threshold  = 1
+alert_sql_connections_threshold = 80
