@@ -1,0 +1,108 @@
+# =============================================================================
+# application-prod.yml — PRODUCTION ENVIRONMENT
+#
+# Activated by: SPRING_PROFILES_ACTIVE=prod
+#
+# PRODUCTION HARDENING vs STAGING:
+#   - Flyway baseline-on-migrate = false; out-of-order = false (strict enforcement)
+#   - Hibernate DDL = validate (schema owned exclusively by Flyway; Hibernate never alters)
+#   - HikariCP pool tuned for production throughput
+#   - Actuator endpoints restricted to health + prometheus only
+#   - Stack traces NEVER exposed in API error responses
+#   - BCrypt cost factor MUST BE >= 12 in BCryptConfig.java (WARNING: L1 in migration audit)
+#   - SQL logging permanently disabled
+#   - Server shutdown: graceful (30 s drain window for in-flight requests)
+#
+# ALL sensitive values are injected via environment variables.
+# NEVER commit real credentials to this file.
+# =============================================================================
+
+spring:
+
+  # ── Database ───────────────────────────────────────────────────────────────
+  datasource:
+    url:      jdbc:postgresql://${DB_HOST}:${DB_PORT:5432}/${DB_NAME}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    hikari:
+      pool-name:            InterviewIQ-Prod-Pool
+      maximum-pool-size:    20
+      minimum-idle:         5
+      idle-timeout:         600000   # 10 min
+      max-lifetime:         1800000  # 30 min
+
+  # ── Flyway ─────────────────────────────────────────────────────────────────
+  flyway:
+    locations:
+      - classpath:db/migration
+    # Strict settings — no baseline, no out-of-order in production
+    baseline-on-migrate: false
+    out-of-order:        false
+
+  # ── Spring AI ─────────────────────────────────────────────────────────────
+  ai:
+    openai:
+      api-key: ${OPENAI_API_KEY}
+
+  # ── JPA ───────────────────────────────────────────────────────────────────
+  jpa:
+    show-sql: false
+
+# =============================================================================
+# Management — tighten actuator exposure in production
+# =============================================================================
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, prometheus
+  endpoint:
+    health:
+      show-details: never
+
+# =============================================================================
+# Server
+# =============================================================================
+server:
+  shutdown: graceful
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+
+# =============================================================================
+# Logging — structured JSON output for log aggregation (CloudWatch/Datadog)
+# =============================================================================
+logging:
+  level:
+    root:                   WARN
+    com.interviewiq:        INFO
+    org.flywaydb:           INFO
+    org.hibernate.SQL:      ERROR
+
+# =============================================================================
+# Application — production configuration
+# =============================================================================
+app:
+  security:
+    jwt:
+      # RSA keys injected as env vars — REQUIRED in production
+      private-key-pem: ${APP_SECURITY_JWT_PRIVATE_KEY_PEM}
+      public-key-pem:  ${APP_SECURITY_JWT_PUBLIC_KEY_PEM}
+      access-token-expiration: 15m
+      refresh-token-expiration: 30d
+    invite:
+      # HMAC secret — REQUIRED in production; min 32 characters
+      secret: ${APP_SECURITY_INVITE_SECRET}
+      expiration: 7d
+
+  razorpay:
+    key-id:     ${RAZORPAY_KEY_ID}
+    key-secret: ${RAZORPAY_KEY_SECRET}
+
+  recall:
+    api-key:         ${RECALL_API_KEY}
+    webhook-secret:  ${RECALL_WEBHOOK_SECRET}
+
+  aws:
+    region:     ${AWS_REGION:ap-south-1}
+    s3-bucket:  ${AWS_S3_BUCKET}
+    use-local-stub: false

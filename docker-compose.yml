@@ -1,0 +1,158 @@
+# =============================================================================
+# docker-compose.yml — InterviewIQ
+#
+# Profiles
+#   (default / no profile)  — starts postgres only
+#                             Use this during local development when you run
+#                             the Spring Boot app from your IDE or Maven.
+#
+#   production              — starts postgres + the containerised app
+#                             docker compose --profile production up
+#
+# Quickstart (local dev)
+#   docker compose up -d
+#   mvn spring-boot:run -Dspring-boot.run.profiles=local
+#
+# Quickstart (full stack)
+#   cp .env.example .env   # fill in real values
+#   docker compose --profile production up -d
+#
+# Environment variables
+#   Copy .env.example → .env and fill in every value.
+#   docker compose automatically reads .env from the project root.
+# =============================================================================
+
+services:
+
+  # ── PostgreSQL 15 ────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: interviewiq-postgres
+    environment:
+      POSTGRES_DB:       ${DB_NAME:-interviewiq_dev}
+      POSTGRES_USER:     ${DB_USERNAME:-interviewiq}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-interviewiq_secret}
+    ports:
+      - "${DB_PORT_EXPOSED:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-interviewiq} -d ${DB_NAME:-interviewiq_dev}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - interviewiq-net
+
+  # ── Spring Boot Application ───────────────────────────────────────────────────
+  # Only started when --profile production is passed.
+  app:
+    profiles:
+      - production
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # Target the final runner stage (skip re-building the builder in prod)
+      target: runner
+    container_name: interviewiq-app
+    image: interviewiq-backend:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+
+      # ── Database ──────────────────────────────────────────────────────────
+      # DB_HOST points to the postgres *service name* inside the compose network.
+      DB_HOST:     postgres
+      DB_PORT:     5432
+      DB_NAME:     ${DB_NAME}
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+
+      # ── Security ──────────────────────────────────────────────────────────
+      # PEM values must be single-line with literal \n for newlines, or use
+      # Docker secrets / a secrets manager in production.
+      APP_SECURITY_JWT_PRIVATE_KEY_PEM: ${APP_SECURITY_JWT_PRIVATE_KEY_PEM}
+      APP_SECURITY_JWT_PUBLIC_KEY_PEM:  ${APP_SECURITY_JWT_PUBLIC_KEY_PEM}
+      APP_SECURITY_INVITE_SECRET:       ${APP_SECURITY_INVITE_SECRET}
+
+      # ── OpenAI ────────────────────────────────────────────────────────────
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+
+      # ── Razorpay ──────────────────────────────────────────────────────────
+      RAZORPAY_KEY_ID:     ${RAZORPAY_KEY_ID}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET}
+
+      # ── Recall.ai ─────────────────────────────────────────────────────────
+      RECALL_API_KEY:        ${RECALL_API_KEY}
+      RECALL_WEBHOOK_SECRET: ${RECALL_WEBHOOK_SECRET}
+
+      # ── AWS ───────────────────────────────────────────────────────────────
+      AWS_REGION:            ${AWS_REGION:-ap-south-1}
+      AWS_S3_BUCKET:         ${AWS_S3_BUCKET}
+      AWS_ACCESS_KEY_ID:     ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+
+      # ── Application ───────────────────────────────────────────────────────
+      APP_FRONTEND_BASE_URL:          ${APP_FRONTEND_BASE_URL:-https://app.interviewiq.ai}
+      APP_BILLING_SESSION_COST_PAISE: ${APP_BILLING_SESSION_COST_PAISE:-5000}
+
+      # ── JVM ───────────────────────────────────────────────────────────────
+      JAVA_OPTS: >-
+        -XX:+UseContainerSupport
+        -XX:MaxRAMPercentage=75.0
+        -Djava.security.egd=file:/dev/./urandom
+
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 60s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 1g        # Guard against runaway heap; tune with MaxRAMPercentage
+    restart: unless-stopped
+    networks:
+      - interviewiq-net
+
+  # ── React Frontend (Nginx) ────────────────────────────────────────────────────
+  # Only started when --profile production is passed.
+  frontend:
+    profiles:
+      - production
+    build:
+      context: frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ""   # Empty = Nginx proxies /api to the app container
+    container_name: interviewiq-frontend
+    image: interviewiq-frontend:latest
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    restart: unless-stopped
+    networks:
+      - interviewiq-net
+
+# ── Volumes ───────────────────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+    name: interviewiq-postgres-data
+
+# ── Networks ──────────────────────────────────────────────────────────────────
+# Explicit bridge network so postgres and app can resolve each other by service
+# name (app connects to "postgres:5432") while being isolated from other compose
+# projects on the same host.
+networks:
+  interviewiq-net:
+    driver: bridge
+    name: interviewiq-network

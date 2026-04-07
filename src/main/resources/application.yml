@@ -1,0 +1,164 @@
+# =============================================================================
+# application.yml — base configuration shared across ALL profiles.
+#
+# Profile-specific files (application-local.yml, application-staging.yml,
+# application-prod.yml) override only the values that differ per environment.
+# Sensitive values (passwords, API keys, secrets) are NEVER committed here;
+# they are provided via environment variables in each environment.
+# =============================================================================
+
+spring:
+
+  application:
+    name: interviewiq-backend
+
+  # ── Virtual threads (Java 21) ──────────────────────────────────────────────
+  threads:
+    virtual:
+      enabled: true
+
+  # ── Jackson ────────────────────────────────────────────────────────────────
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      write-dates-as-timestamps: false
+    deserialization:
+      fail-on-unknown-properties: false
+    property-naming-strategy: SNAKE_CASE
+
+  # ── Data Source (overridden per profile) ───────────────────────────────────
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      pool-name:            InterviewIQ-HikariPool
+      maximum-pool-size:    10
+      minimum-idle:         2
+      idle-timeout:         30000     # 30 s
+      connection-timeout:   20000     # 20 s
+      max-lifetime:         1800000   # 30 min
+      # keepalive-query runs in the background; no extra connection needed
+      keepalive-time:       60000     # 1 min
+
+  # ── JPA / Hibernate ────────────────────────────────────────────────────────
+  jpa:
+    open-in-view: false             # disable OSIV — explicit transaction boundaries
+    properties:
+      hibernate:
+        # dialect intentionally omitted — Hibernate 6 auto-detects PostgreSQL
+        format_sql: false
+        jdbc:
+          batch_size: 25
+          order_inserts: true
+          order_updates: true
+        generate_statistics: false
+    hibernate:
+      # Flyway owns the schema; Hibernate must not touch DDL
+      ddl-auto: validate
+
+  # ── Flyway ─────────────────────────────────────────────────────────────────
+  flyway:
+    enabled:              true
+    baseline-on-migrate:  false
+    validate-on-migrate:  true
+    out-of-order:         false
+    # Locations are profile-specific (local adds db/seed; prod uses only db/migration)
+    locations:
+      - classpath:db/migration
+
+  # ── Spring AI ──────────────────────────────────────────────────────────────
+  ai:
+    openai:
+      chat:
+        options:
+          model: gpt-4o
+          temperature: 0.2
+
+# =============================================================================
+# Management / Actuator
+# =============================================================================
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics, prometheus
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: when-authorized
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+# =============================================================================
+# Server
+# =============================================================================
+server:
+  port: 8080
+  shutdown: graceful
+  tomcat:
+    connection-timeout: 20s
+  error:
+    include-message: never
+    include-stacktrace: never
+
+# =============================================================================
+# Logging (base — profiles can override log levels)
+# =============================================================================
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{traceId:-}] %logger{36} - %msg%n"
+  level:
+    root:                           INFO
+    com.interviewiq:                INFO
+    org.springframework.security:   WARN
+    org.hibernate.SQL:              WARN
+    org.flywaydb:                   INFO
+
+# =============================================================================
+# Application security — key defaults (overridden per profile)
+# Private/public key PEMs and invite secret are injected via env vars in prod.
+# Empty strings trigger ephemeral key generation (local/test only).
+# =============================================================================
+app:
+  security:
+    jwt:
+      private-key-pem: ""
+      public-key-pem: ""
+      access-token-expiration: 15m
+      refresh-token-expiration: 30d
+    invite:
+      secret: ""
+      expiration: 7d
+    rate-limit:
+      capacity: 20          # max burst (tokens per bucket)
+      refill-tokens: 10     # tokens added per refill window
+      refill-duration: PT1M # refill window (ISO-8601 duration)
+  aws:
+    region: ap-south-1
+    s3-bucket: ""
+    ses-from-address: noreply@interviewiq.ai
+    use-local-stub: false
+  billing:
+    session-cost-paise: 5000   # ₹50 per interview session (override per-environment)
+  frontend:
+    base-url: http://localhost:3000   # override in staging/prod
+  ai:
+    evaluation-max-attempts: 3        # max LLM retries for the evaluation pipeline
+  razorpay:
+    key-id: ""
+    key-secret: ""
+  recall:
+    api-key: ""
+    webhook-secret: ""
+
+# =============================================================================
+# springdoc-openapi — available at /swagger-ui.html and /v3/api-docs
+# =============================================================================
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: alpha
+    tags-sorter: alpha
+    display-request-duration: true

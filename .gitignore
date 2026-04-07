@@ -1,0 +1,59 @@
+# =============================================================================
+# .gitignore — InterviewIQ Backend
+# =============================================================================
+
+# ── Secrets — NEVER commit these ─────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# RSA keys generated locally for development
+*.pem
+private.pem
+public.pem
+
+# ── Maven build output ────────────────────────────────────────────────────────
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+# ── IDE — IntelliJ IDEA ───────────────────────────────────────────────────────
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+
+# ── IDE — VS Code ─────────────────────────────────────────────────────────────
+.vscode/
+!.vscode/extensions.json
+.claude/
+
+# ── IDE — Eclipse ─────────────────────────────────────────────────────────────
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+bin/
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Docker ────────────────────────────────────────────────────────────────────
+# Local override files — never commit environment-specific compose overrides
+docker-compose.override.yml
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Test reports ──────────────────────────────────────────────────────────────
+/target/surefire-reports/
+
+# ── Spring Boot devtools restart trigger ─────────────────────────────────────
+.spring-boot-devtools.properties

@@ -1,0 +1,74 @@
+# =============================================================================
+# application-staging.yml — STAGING ENVIRONMENT
+#
+# Activated by: SPRING_PROFILES_ACTIVE=staging
+#
+# ALL sensitive values (DB password, API keys, secrets) are injected via
+# environment variables at deployment time (ECS task definition / K8s secrets).
+# This file contains only non-sensitive structural configuration.
+#
+# STAGING DISTINCTIONS FROM LOCAL:
+#   - Flyway loads db/migration ONLY (no seed data)
+#   - HikariCP pool size tuned for staging load
+#   - BCrypt cost factor documented as MUST BE >= 12 (see BCryptConfig.java)
+#   - SQL logging disabled (no sensitive query data in staging logs)
+# =============================================================================
+
+spring:
+
+  # ── Database — injected via environment variable ───────────────────────────
+  #   Required env vars:
+  #     DB_HOST, DB_PORT, DB_NAME, DB_USERNAME, DB_PASSWORD
+  datasource:
+    url:      jdbc:postgresql://${DB_HOST}:${DB_PORT:5432}/${DB_NAME}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    hikari:
+      pool-name:          InterviewIQ-Staging-Pool
+      maximum-pool-size:  15
+      minimum-idle:       3
+
+  # ── Flyway — staging uses versioned migrations ONLY ───────────────────────
+  flyway:
+    locations:
+      - classpath:db/migration
+
+  # ── Spring AI ─────────────────────────────────────────────────────────────
+  ai:
+    openai:
+      api-key: ${OPENAI_API_KEY}
+
+  # ── JPA ───────────────────────────────────────────────────────────────────
+  jpa:
+    show-sql: false
+
+# =============================================================================
+# Logging
+# =============================================================================
+logging:
+  level:
+    root:                   INFO
+    com.interviewiq:        INFO
+    org.flywaydb:           INFO
+    org.hibernate.SQL:      WARN
+
+# =============================================================================
+# Application — staging configuration
+# =============================================================================
+app:
+  jwt:
+    access-token-expiry-seconds:  900       # 15 minutes
+    refresh-token-expiry-days:    30
+
+  razorpay:
+    key-id:     ${RAZORPAY_KEY_ID}
+    key-secret: ${RAZORPAY_KEY_SECRET}
+
+  recall:
+    api-key:         ${RECALL_API_KEY}
+    webhook-secret:  ${RECALL_WEBHOOK_SECRET}
+
+  aws:
+    region:     ${AWS_REGION:ap-south-1}
+    s3-bucket:  ${AWS_S3_BUCKET}
+    use-local-stub: false

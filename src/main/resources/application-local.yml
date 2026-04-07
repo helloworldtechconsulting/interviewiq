@@ -1,0 +1,90 @@
+# =============================================================================
+# application-local.yml — LOCAL DEVELOPMENT ONLY
+#
+# Activated by: -Dspring.profiles.active=local  (or SPRING_PROFILES_ACTIVE=local)
+#
+# This file is safe to commit; it contains only localhost credentials that are
+# meaningless outside of Docker Compose on a developer machine.
+#
+# KEY BEHAVIOURS IN LOCAL PROFILE:
+#   1. Flyway loads BOTH db/migration AND db/seed (adds R__dev_seed_data.sql)
+#   2. Hibernate DDL = validate (Flyway owns the schema — never let Hibernate alter)
+#   3. Spring AI: dummy API key prevents startup failure during DB-only smoke tests
+#   4. SQL and Flyway logging set to DEBUG for migration troubleshooting
+# =============================================================================
+
+spring:
+
+  # ── Database — matches docker-compose.yml credentials ─────────────────────
+  datasource:
+    url:      jdbc:postgresql://localhost:5432/interviewiq_dev
+    username: interviewiq
+    password: interviewiq_secret
+    hikari:
+      pool-name: InterviewIQ-Local-Pool
+
+  # ── Flyway — local profile includes seed directory ────────────────────────
+  #   classpath:db/migration  → V001–V026  (versioned migrations)
+  #   classpath:db/seed       → R__dev_seed_data.sql  (repeatable; local only)
+  #
+  #   Physical separation: db/seed is NEVER on the production classpath, so
+  #   seed data cannot reach staging/prod regardless of profile misconfiguration.
+  flyway:
+    locations:
+      - classpath:db/migration
+      - classpath:db/seed
+
+  # ── Spring AI — stub key; no real OpenAI calls in local smoke test ─────────
+  #   Replace with a real key when testing the AI pipeline locally.
+  ai:
+    openai:
+      api-key: sk-local-dev-stub-key-replace-for-ai-testing
+
+  # ── JPA — verbose SQL for development debugging ───────────────────────────
+  jpa:
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+
+# =============================================================================
+# Logging — more verbose in local to aid migration and startup debugging
+# =============================================================================
+logging:
+  level:
+    com.interviewiq:               DEBUG
+    org.flywaydb:                  DEBUG
+    org.hibernate.SQL:             DEBUG
+    org.hibernate.orm.jdbc.bind:   TRACE
+    org.springframework.security:  INFO
+
+# =============================================================================
+# Application-level local overrides
+# =============================================================================
+app:
+  security:
+    jwt:
+      # Ephemeral keys in local (empty = auto-generate on startup)
+      private-key-pem: ""
+      public-key-pem:  ""
+      # Longer lifetime for local dev convenience
+      access-token-expiration: 1h
+      refresh-token-expiration: 7d
+    invite:
+      secret: ""      # auto-generate locally
+
+  # Razorpay — test mode key prefix; replace with live key in prod
+  razorpay:
+    key-id:     rzp_test_local_stub
+    key-secret: local_stub_secret
+
+  # Recall.ai — stub; no bot dispatch in local smoke tests
+  recall:
+    api-key:    recall_local_stub_key
+    webhook-secret: recall_local_webhook_secret
+
+  # AWS — stub endpoint to prevent real S3/SES calls locally
+  aws:
+    region:           ap-south-1
+    s3-bucket:        interviewiq-dev-local
+    use-local-stub:   true
