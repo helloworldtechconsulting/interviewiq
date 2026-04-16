@@ -80,6 +80,9 @@ public class CandidateService {
         candidate.setJobOpeningId(req.jobOpeningId());
         candidate.setEmail(email);
         candidate.setFullName(req.fullName().strip());
+        if (req.phone() != null && !req.phone().isBlank()) {
+            candidate.setPhone(req.phone().strip());
+        }
         candidate.setResumeExtractionStatus(PipelineStatus.PENDING);
         candidateRepository.save(candidate);
 

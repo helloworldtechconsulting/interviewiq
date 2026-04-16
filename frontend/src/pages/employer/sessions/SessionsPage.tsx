@@ -58,8 +58,8 @@ export function SessionsPage() {
   const filtered = search.trim()
     ? sessions.filter(
         (s) =>
-          s.candidateName.toLowerCase().includes(search.toLowerCase()) ||
-          s.jobTitle.toLowerCase().includes(search.toLowerCase()),
+          s.candidateId.toLowerCase().includes(search.toLowerCase()) ||
+          s.jobOpeningId.toLowerCase().includes(search.toLowerCase()),
       )
     : sessions;
 
@@ -128,16 +128,23 @@ export function SessionsPage() {
             >
               <CardContent className="flex items-center gap-4 p-5">
                 {/* Avatar */}
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary">
-                  {s.candidateName.charAt(0).toUpperCase()}
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
+                  {s.candidateId.slice(0, 2).toUpperCase()}
                 </div>
 
                 {/* Details */}
                 <div className="min-w-0 flex-1">
-                  <p className="font-semibold">{s.candidateName}</p>
-                  <p className="text-sm text-muted-foreground">{s.jobTitle}</p>
+                  <p className="font-mono text-sm font-semibold">
+                    {s.candidateId.slice(0, 8)}…
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Job {s.jobOpeningId.slice(0, 8)}…
+                  </p>
                   <p className="mt-0.5 text-xs text-muted-foreground">
-                    {formatDateTime(s.scheduledAt)} · {s.durationMinutes} min
+                    {s.scheduledAt ? formatDateTime(s.scheduledAt) : "No schedule"}
+                    {s.durationSeconds != null
+                      ? ` · ${Math.round(s.durationSeconds / 60)} min`
+                      : ""}
                   </p>
                 </div>
 

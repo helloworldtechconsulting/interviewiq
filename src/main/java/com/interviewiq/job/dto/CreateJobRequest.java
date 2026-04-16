@@ -2,6 +2,7 @@ package com.interviewiq.job.dto;
 
 import com.interviewiq.job.domain.EmploymentType;
 import com.interviewiq.job.domain.LocationType;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
@@ -16,5 +17,13 @@ public record CreateJobRequest(
 
         LocationType locationType,
 
-        EmploymentType employmentType
+        EmploymentType employmentType,
+
+        String description,
+
+        @Min(value = 0, message = "Minimum experience cannot be negative.")
+        Integer experienceMin,
+
+        @Min(value = 0, message = "Maximum experience cannot be negative.")
+        Integer experienceMax
 ) {}

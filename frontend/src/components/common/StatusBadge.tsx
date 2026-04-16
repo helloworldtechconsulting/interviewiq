@@ -4,11 +4,13 @@ import {
   candidateStatusLabel,
   jobStatusColour,
   jobStatusLabel,
+  pipelineStatusColour,
+  pipelineStatusLabel,
   sessionStatusColour,
   sessionStatusLabel,
 } from "@/lib/utils";
 
-type StatusKind = "job" | "candidate" | "session";
+type StatusKind = "job" | "candidate" | "session" | "pipeline";
 
 interface StatusBadgeProps {
   kind: StatusKind;
@@ -20,12 +22,14 @@ const labelMap: Record<StatusKind, Record<string, string>> = {
   job: jobStatusLabel,
   candidate: candidateStatusLabel,
   session: sessionStatusLabel,
+  pipeline: pipelineStatusLabel,
 };
 
 const colourMap: Record<StatusKind, Record<string, string>> = {
   job: jobStatusColour,
   candidate: candidateStatusColour,
   session: sessionStatusColour,
+  pipeline: pipelineStatusColour,
 };
 
 export function StatusBadge({ kind, status, className }: StatusBadgeProps) {

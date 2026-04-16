@@ -1,5 +1,9 @@
 // =============================================================================
 // types/index.ts — All domain types mirroring the InterviewIQ backend API
+//
+// IMPORTANT: All types here match backend JSON responses AFTER the axios
+// interceptor has applied snake_case → camelCase transformation.
+// E.g. backend "job_opening_id" → frontend "jobOpeningId".
 // =============================================================================
 
 // ── Shared / Pagination ───────────────────────────────────────────────────────
@@ -27,17 +31,17 @@ export interface ApiError {
 
 export type UserRole = "ADMIN" | "RECRUITER" | "VIEWER";
 
-export type JobStatus = "DRAFT" | "OPEN" | "CLOSED" | "ARCHIVED";
+export type CompanyStatus = "ACTIVE" | "INACTIVE" | "SUSPENDED";
 
-export type CandidateStatus =
-  | "APPLIED"
-  | "SCREENING"
-  | "INTERVIEW_SCHEDULED"
-  | "INTERVIEW_DONE"
-  | "OFFER_EXTENDED"
-  | "HIRED"
-  | "REJECTED"
-  | "WITHDRAWN";
+export type CompanySize = "STARTUP" | "SMALL" | "MEDIUM" | "LARGE";
+
+export type JobStatus = "ACTIVE" | "ARCHIVED" | "CLOSED";
+
+export type LocationType = "REMOTE" | "ONSITE" | "HYBRID";
+
+export type EmploymentType = "FULL_TIME" | "PART_TIME" | "CONTRACT" | "INTERNSHIP";
+
+export type PipelineStatus = "PENDING" | "IN_PROGRESS" | "DONE" | "FAILED";
 
 export type SessionStatus =
   | "INVITED"
@@ -47,8 +51,6 @@ export type SessionStatus =
   | "EXPIRED"
   | "ERROR";
 
-export type QuestionDifficulty = "EASY" | "MEDIUM" | "HARD";
-
 export type TransactionType =
   | "TOPUP"
   | "RESERVATION"
@@ -56,7 +58,25 @@ export type TransactionType =
   | "RELEASE"
   | "REFUND";
 
-export type PaymentStatus = "CREATED" | "PAID" | "FAILED" | "REFUNDED";
+export type TransactionStatus = "PENDING" | "CONFIRMED" | "RELEASED" | "FAILED";
+
+export type QuestionDifficulty = "EASY" | "MEDIUM" | "HARD";
+
+export type SessionEventType =
+  | "SESSION_STARTED"
+  | "SESSION_ENDED"
+  | "TAB_SWITCH"
+  | "CAMERA_OFF"
+  | "CAMERA_ON"
+  | "MULTI_FACE_DETECTED"
+  | "AUDIO_MUTED"
+  | "AUDIO_UNMUTED"
+  | "SCREEN_SHARE_STARTED"
+  | "SCREEN_SHARE_STOPPED"
+  | "CONNECTION_LOST"
+  | "CONNECTION_RESTORED";
+
+export type SuppressionReason = "BOUNCE" | "COMPLAINT" | "MANUAL";
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
@@ -72,6 +92,7 @@ export interface LoginRequest {
   password: string;
 }
 
+/** Mirrors AuthService/UserResponse.java — backend sends snake_case, interceptor converts to camelCase. */
 export interface UserResponse {
   id: string;
   companyId: string;
@@ -80,6 +101,7 @@ export interface UserResponse {
   role: UserRole;
   active: boolean;
   emailVerified: boolean;
+  lastLoginAt: string | null;  // null for accounts that have never completed a login
   createdAt: string;
 }
 
@@ -124,34 +146,47 @@ export interface JwtPayload {
 
 // ── Company ───────────────────────────────────────────────────────────────────
 
+/** Mirrors CompanyProfileResponse.java */
 export interface Company {
   id: string;
   name: string;
-  website?: string;
-  industry?: string;
-  logoUrl?: string;
+  slug: string;
+  domain: string | null;
+  status: CompanyStatus;
+  website: string | null;
+  industry: string | null;
+  logoS3Key: string | null;
+  size: CompanySize | null;
+  gstNumber: string | null;
   createdAt: string;
 }
 
+/** Mirrors UpdateCompanyRequest.java — all fields optional (null = do not change) */
 export interface UpdateCompanyRequest {
   name?: string;
-  website?: string;
+  domain?: string;      // empty string clears the field
+  website?: string;     // empty string clears the field
   industry?: string;
+  size?: CompanySize;
+  gstNumber?: string;   // empty string clears the field
 }
 
 export interface LogoUploadUrlResponse {
   uploadUrl: string;
-  key: string;
+  objectKey: string;
 }
 
 // ── User / Team ───────────────────────────────────────────────────────────────
 
 export interface TeamMember {
   id: string;
+  companyId: string;
   fullName: string;
   email: string;
   role: UserRole;
   active: boolean;
+  emailVerified: boolean;
+  lastLoginAt: string | null;
   createdAt: string;
 }
 
@@ -168,96 +203,143 @@ export interface UpdateMemberRequest {
 
 // ── Job ───────────────────────────────────────────────────────────────────────
 
+/** Mirrors JobResponse.java */
 export interface Job {
   id: string;
+  companyId: string;
+  createdBy: string;
   title: string;
-  department?: string;
-  location?: string;
-  description?: string;
+  department: string | null;
+  locationType: LocationType | null;
+  employmentType: EmploymentType | null;
+  jdS3Key: string | null;
+  jdExtractionStatus: PipelineStatus;
+  description: string | null;
+  experienceMin: number | null;
+  experienceMax: number | null;
   status: JobStatus;
   createdAt: string;
   updatedAt: string;
 }
 
+/** Mirrors CreateJobRequest.java */
 export interface CreateJobRequest {
   title: string;
   department?: string;
-  location?: string;
+  locationType?: LocationType;
+  employmentType?: EmploymentType;
   description?: string;
+  experienceMin?: number;
+  experienceMax?: number;
 }
 
+/** Mirrors UpdateJobRequest.java — all fields optional */
 export interface UpdateJobRequest {
   title?: string;
   department?: string;
-  location?: string;
-  description?: string;
+  locationType?: LocationType;
+  employmentType?: EmploymentType;
   status?: JobStatus;
+  description?: string;
+  experienceMin?: number;
+  experienceMax?: number;
 }
 
 export interface JdUploadUrlResponse {
   uploadUrl: string;
-  key: string;
+  objectKey: string;
 }
 
 // ── Candidate ─────────────────────────────────────────────────────────────────
 
+/** Mirrors CandidateResponse.java */
 export interface Candidate {
   id: string;
-  jobId: string;
-  jobTitle: string;
-  fullName: string;
+  companyId: string;
+  jobOpeningId: string;
   email: string;
-  phone?: string;
-  resumeKey?: string;
-  status: CandidateStatus;
+  fullName: string;
+  phone: string | null;
+  resumeS3Key: string | null;
+  resumeExtractionStatus: PipelineStatus;
   createdAt: string;
   updatedAt: string;
 }
 
+/** Mirrors CreateCandidateRequest.java */
 export interface CreateCandidateRequest {
-  jobId: string;
-  fullName: string;
+  jobOpeningId: string;
   email: string;
+  fullName: string;
   phone?: string;
 }
 
 export interface UpdateCandidateRequest {
   fullName?: string;
   phone?: string;
-  status?: CandidateStatus;
 }
 
 export interface ResumeUploadUrlResponse {
   uploadUrl: string;
-  key: string;
+  objectKey: string;
 }
 
 // ── Session ───────────────────────────────────────────────────────────────────
 
+/** Mirrors SessionResponse.java */
 export interface Session {
   id: string;
+  companyId: string;
+  jobOpeningId: string;
   candidateId: string;
-  candidateName: string;
-  candidateEmail: string;
-  jobId: string;
-  jobTitle: string;
-  scheduledAt: string;
-  durationMinutes: number;
-  meetUrl?: string;
-  botId?: string;
   status: SessionStatus;
+  questionGenerationStatus: PipelineStatus;
+  googleMeetUrl: string | null;
+  recallBotId: string | null;
+  scheduledAt: string | null;
+  inviteExpiresAt: string;
+  startedAt: string | null;
+  endedAt: string | null;
+  durationSeconds: number | null;
+  recordingS3Key: string | null;
+  /** JSON array string — parse client-side when displaying proctoring flags */
+  proctoringFlagsJsonb: string | null;
+  cancelledAt: string | null;
+  errorCode: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
+/** Mirrors CreateSessionRequest.java */
 export interface CreateSessionRequest {
+  jobOpeningId: string;
   candidateId: string;
-  scheduledAt: string;       // ISO-8601
-  durationMinutes?: number;  // default 60
+  scheduledAt: string;   // ISO-8601 UTC timestamp — must be a future time
 }
 
 export interface SetMeetUrlRequest {
   meetUrl: string;
+}
+
+/**
+ * One entry in a session's proctoring_flags_jsonb array.
+ * Parse session.proctoringFlagsJsonb with JSON.parse() to get this.
+ */
+export interface ProctoringFlag {
+  type: SessionEventType;
+  count?: number;
+  totalSeconds?: number;
+  firstOccurrence?: string;
+}
+
+/** Mirrors SessionEvent.java — returned by the proctoring/events endpoint. */
+export interface SessionEvent {
+  id: string;
+  companyId: string;
+  sessionId: string;
+  eventType: SessionEventType;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
 }
 
 // ── Evaluation ────────────────────────────────────────────────────────────────
@@ -303,16 +385,19 @@ export interface Wallet {
   availablePaise: number;    // balancePaise − reservedPaise
 }
 
+/** Mirrors TransactionResponse.java */
 export interface WalletTransaction {
   id: string;
   companyId: string;
   walletId: string;
-  sessionId?: string;
+  sessionId: string | null;
   transactionType: TransactionType;
   amountPaise: number;
   balanceAfterPaise: number;
-  status: "CONFIRMED" | "PENDING" | "RELEASED" | "FAILED";
-  razorpayOrderId?: string;
+  status: TransactionStatus;
+  razorpayOrderId: string | null;
+  razorpayPaymentId: string | null;
+  description: string | null;
   createdAt: string;
 }
 
@@ -327,6 +412,18 @@ export interface RazorpayOrder {
   keyId: string;             // Razorpay key ID for Checkout.js
 }
 
+// ── Email suppression ─────────────────────────────────────────────────────────
+
+/** Mirrors EmailSuppression.java */
+export interface EmailSuppression {
+  id: string;
+  email: string;
+  reason: SuppressionReason;
+  providerNotificationId: string | null;
+  notes: string | null;
+  createdAt: string;
+}
+
 // ── Candidate Interview Room (invite-token auth) ──────────────────────────────
 
 export interface CandidateSession {
@@ -334,9 +431,8 @@ export interface CandidateSession {
   candidateName: string;
   jobTitle: string;
   companyName: string;
-  scheduledAt: string;
-  durationMinutes: number;
-  meetUrl?: string;
+  scheduledAt: string | null;
+  meetUrl: string | null;
   status: SessionStatus;
 }
 

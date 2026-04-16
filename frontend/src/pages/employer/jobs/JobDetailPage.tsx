@@ -24,7 +24,7 @@ import { jobsApi } from "@/api/modules/jobs";
 import { candidatesApi } from "@/api/modules/candidates";
 import { queryKeys } from "@/lib/queryKeys";
 import { AppError } from "@/api/client";
-import type { JobStatus } from "@/types";
+import type { JobStatus, LocationType } from "@/types";
 import { PageHeader } from "@/components/common/PageHeader";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { EmptyState } from "@/components/common/EmptyState";
@@ -47,9 +47,9 @@ import { formatDate, uploadToS3 } from "@/lib/utils";
 const editSchema = z.object({
   title: z.string().min(2, "Title must be at least 2 characters"),
   department: z.string().optional(),
-  location: z.string().optional(),
+  locationType: z.enum(["REMOTE", "ONSITE", "HYBRID"]).optional(),
   description: z.string().optional(),
-  status: z.enum(["DRAFT", "OPEN", "CLOSED", "ARCHIVED"]),
+  status: z.enum(["ACTIVE", "CLOSED", "ARCHIVED"]),
 });
 
 type EditForm = z.infer<typeof editSchema>;
@@ -76,8 +76,8 @@ export function JobDetailPage() {
   });
 
   const { data: candidatesPage, isLoading: candidatesLoading } = useQuery({
-    queryKey: queryKeys.candidates.list({ jobId }),
-    queryFn: () => candidatesApi.list({ jobId, size: 50 }),
+    queryKey: queryKeys.candidates.list({ jobOpeningId: jobId }),
+    queryFn: () => candidatesApi.list({ jobOpeningId: jobId, size: 50 }),
     enabled: !!jobId,
   });
 
@@ -97,7 +97,7 @@ export function JobDetailPage() {
       ? {
           title: job.title,
           department: job.department ?? "",
-          location: job.location ?? "",
+          locationType: job.locationType ?? undefined,
           description: job.description ?? "",
           status: job.status as JobStatus,
         }
@@ -295,10 +295,10 @@ export function JobDetailPage() {
                     </div>
                     <div>
                       <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                        Location
+                        Location Type
                       </dt>
                       <dd className="mt-1 text-sm">
-                        {job.location ?? "—"}
+                        {job.locationType ?? "—"}
                       </dd>
                     </div>
                   </dl>
@@ -332,7 +332,7 @@ export function JobDetailPage() {
                       </SelectTrigger>
                       <SelectContent>
                         {(
-                          ["DRAFT", "OPEN", "CLOSED", "ARCHIVED"] as JobStatus[]
+                          ["ACTIVE", "CLOSED", "ARCHIVED"] as JobStatus[]
                         ).map((s) => (
                           <SelectItem key={s} value={s}>
                             {s.charAt(0) + s.slice(1).toLowerCase()}
@@ -363,8 +363,24 @@ export function JobDetailPage() {
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <Label htmlFor="edit-loc">Location</Label>
-                      <Input id="edit-loc" {...register("location")} />
+                      <Label>Location Type</Label>
+                      <Select
+                        value={watch("locationType") ?? ""}
+                        onValueChange={(v) =>
+                          setValue("locationType", v as LocationType, {
+                            shouldDirty: true,
+                          })
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select…" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="REMOTE">Remote</SelectItem>
+                          <SelectItem value="ONSITE">On-site</SelectItem>
+                          <SelectItem value="HYBRID">Hybrid</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
                   </div>
 
@@ -433,7 +449,7 @@ export function JobDetailPage() {
                           {c.email}
                         </p>
                       </div>
-                      <StatusBadge kind="candidate" status={c.status} />
+                      <StatusBadge kind="pipeline" status={c.resumeExtractionStatus} />
                     </li>
                   ))}
                 </ul>
