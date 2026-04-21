@@ -68,6 +68,36 @@ public class JobOpening {
     @Column(nullable = false, length = 50)
     private PipelineStatus jdExtractionStatus = PipelineStatus.PENDING;
 
+    /**
+     * Human-written job description shown to candidates and recruiters.
+     * Distinct from jdText (machine-extracted from uploaded JD file).
+     * Added V029.
+     */
+    @Column(columnDefinition = "TEXT")
+    private String description;
+
+    /**
+     * Minimum years of experience required. Added V029.
+     * DB CHECK: experience_min >= 0.
+     */
+    @Column(name = "experience_min")
+    private Integer experienceMin;
+
+    /**
+     * Maximum years of experience. Added V029.
+     * DB CHECK: experience_max IS NULL OR experience_max >= experience_min.
+     */
+    @Column(name = "experience_max")
+    private Integer experienceMax;
+
+    /**
+     * AI-generated or recruiter-curated question bank as a JSON array.
+     * Structure: [{"id":"...","text":"...","dimension":"TECHNICAL"}, ...]
+     * Added V029.
+     */
+    @Column(name = "questions_jsonb", columnDefinition = "jsonb")
+    private String questionsJsonb;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 50)
     private JobStatus status = JobStatus.ACTIVE;
@@ -121,6 +151,18 @@ public class JobOpening {
 
     public PipelineStatus getJdExtractionStatus() { return jdExtractionStatus; }
     public void setJdExtractionStatus(PipelineStatus jdExtractionStatus) { this.jdExtractionStatus = jdExtractionStatus; }
+
+    public String getDescription() { return description; }
+    public void setDescription(String description) { this.description = description; }
+
+    public Integer getExperienceMin() { return experienceMin; }
+    public void setExperienceMin(Integer experienceMin) { this.experienceMin = experienceMin; }
+
+    public Integer getExperienceMax() { return experienceMax; }
+    public void setExperienceMax(Integer experienceMax) { this.experienceMax = experienceMax; }
+
+    public String getQuestionsJsonb() { return questionsJsonb; }
+    public void setQuestionsJsonb(String questionsJsonb) { this.questionsJsonb = questionsJsonb; }
 
     public JobStatus getStatus() { return status; }
     public void setStatus(JobStatus status) { this.status = status; }

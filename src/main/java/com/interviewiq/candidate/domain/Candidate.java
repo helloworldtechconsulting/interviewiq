@@ -61,6 +61,13 @@ public class Candidate {
     @Column(nullable = false, length = 50)
     private PipelineStatus resumeExtractionStatus = PipelineStatus.PENDING;
 
+    /**
+     * Candidate phone number (optional). Added V030.
+     * DB CHECK: phone IS NULL OR length(trim(phone)) > 0.
+     */
+    @Column(length = 30)
+    private String phone;
+
     @Column(nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 
@@ -104,6 +111,9 @@ public class Candidate {
 
     public PipelineStatus getResumeExtractionStatus() { return resumeExtractionStatus; }
     public void setResumeExtractionStatus(PipelineStatus status) { this.resumeExtractionStatus = status; }
+
+    public String getPhone() { return phone; }
+    public void setPhone(String phone) { this.phone = phone; }
 
     public OffsetDateTime getCreatedAt() { return createdAt; }
     public OffsetDateTime getUpdatedAt() { return updatedAt; }

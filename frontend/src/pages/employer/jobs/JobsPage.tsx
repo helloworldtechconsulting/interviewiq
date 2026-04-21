@@ -23,7 +23,7 @@ import {
 import { jobsApi } from "@/api/modules/jobs";
 import { queryKeys } from "@/lib/queryKeys";
 import { AppError } from "@/api/client";
-import type { JobStatus } from "@/types";
+import type { JobStatus, LocationType } from "@/types";
 import { PageHeader } from "@/components/common/PageHeader";
 import { EmptyState } from "@/components/common/EmptyState";
 import { StatusBadge } from "@/components/common/StatusBadge";
@@ -54,7 +54,7 @@ const PAGE_SIZE = 10;
 const createJobSchema = z.object({
   title: z.string().min(2, "Job title must be at least 2 characters"),
   department: z.string().optional(),
-  location: z.string().optional(),
+  locationType: z.enum(["REMOTE", "ONSITE", "HYBRID"]).optional(),
   description: z.string().optional(),
 });
 
@@ -64,8 +64,7 @@ type CreateJobForm = z.infer<typeof createJobSchema>;
 
 const STATUS_OPTIONS: { label: string; value: string }[] = [
   { label: "All statuses", value: "ALL" },
-  { label: "Open", value: "OPEN" },
-  { label: "Draft", value: "DRAFT" },
+  { label: "Active", value: "ACTIVE" },
   { label: "Closed", value: "CLOSED" },
   { label: "Archived", value: "ARCHIVED" },
 ];
@@ -84,6 +83,8 @@ function CreateJobDialog({ open, onOpenChange }: CreateJobDialogProps) {
     register,
     handleSubmit,
     reset,
+    setValue,
+    watch,
     setError,
     formState: { errors },
   } = useForm<CreateJobForm>({ resolver: zodResolver(createJobSchema) });
@@ -159,14 +160,26 @@ function CreateJobDialog({ open, onOpenChange }: CreateJobDialogProps) {
               />
             </div>
 
-            {/* Location */}
+            {/* Location Type */}
             <div className="space-y-1.5">
-              <Label htmlFor="location">Location</Label>
-              <Input
-                id="location"
-                placeholder="e.g. Bengaluru / Remote"
-                {...register("location")}
-              />
+              <Label>Location Type</Label>
+              <Select
+                value={watch("locationType") ?? ""}
+                onValueChange={(v) =>
+                  setValue("locationType", v as LocationType, {
+                    shouldDirty: true,
+                  })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select…" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="REMOTE">Remote</SelectItem>
+                  <SelectItem value="ONSITE">On-site</SelectItem>
+                  <SelectItem value="HYBRID">Hybrid</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             {/* Description */}
@@ -321,10 +334,10 @@ export function JobsPage() {
                         {job.department}
                       </span>
                     )}
-                    {job.location && (
+                    {job.locationType && (
                       <span className="flex items-center gap-1">
                         <MapPin className="h-3.5 w-3.5" />
-                        {job.location}
+                        {job.locationType}
                       </span>
                     )}
                   </div>

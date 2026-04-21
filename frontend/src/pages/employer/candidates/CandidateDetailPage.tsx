@@ -26,7 +26,6 @@ import { candidatesApi } from "@/api/modules/candidates";
 import { sessionsApi } from "@/api/modules/sessions";
 import { queryKeys } from "@/lib/queryKeys";
 import { AppError } from "@/api/client";
-import type { CandidateStatus } from "@/types";
 import { PageHeader } from "@/components/common/PageHeader";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { EmptyState } from "@/components/common/EmptyState";
@@ -42,37 +41,15 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { formatDate, formatDateTime, uploadToS3 } from "@/lib/utils";
 
 // ── Schedule session schema ───────────────────────────────────────────────────
 
 const scheduleSchema = z.object({
   scheduledAt: z.string().min(1, "Please pick a date and time"),
-  durationMinutes: z.coerce
-    .number()
-    .min(15, "Minimum 15 minutes")
-    .max(180, "Maximum 3 hours"),
 });
 
 type ScheduleForm = z.infer<typeof scheduleSchema>;
-
-const CANDIDATE_STATUSES: CandidateStatus[] = [
-  "APPLIED",
-  "SCREENING",
-  "INTERVIEW_SCHEDULED",
-  "INTERVIEW_DONE",
-  "OFFER_EXTENDED",
-  "HIRED",
-  "REJECTED",
-  "WITHDRAWN",
-];
 
 // ── Schedule Session Dialog ───────────────────────────────────────────────────
 
@@ -80,6 +57,7 @@ interface ScheduleDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   candidateId: string;
+  jobOpeningId: string;
   candidateName: string;
 }
 
@@ -87,6 +65,7 @@ function ScheduleSessionDialog({
   open,
   onOpenChange,
   candidateId,
+  jobOpeningId,
   candidateName,
 }: ScheduleDialogProps) {
   const qc = useQueryClient();
@@ -99,15 +78,14 @@ function ScheduleSessionDialog({
     formState: { errors },
   } = useForm<ScheduleForm>({
     resolver: zodResolver(scheduleSchema),
-    defaultValues: { durationMinutes: 60 },
   });
 
   const mutation = useMutation({
     mutationFn: (data: ScheduleForm) =>
       sessionsApi.create({
+        jobOpeningId,
         candidateId,
         scheduledAt: new Date(data.scheduledAt).toISOString(),
-        durationMinutes: data.durationMinutes,
       }),
     onSuccess(session) {
       toast.success("AI interview session scheduled.");
@@ -160,23 +138,6 @@ function ScheduleSessionDialog({
             {errors.scheduledAt && (
               <p className="text-xs text-destructive">
                 {errors.scheduledAt.message}
-              </p>
-            )}
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="durationMinutes">Duration (minutes)</Label>
-            <Input
-              id="durationMinutes"
-              type="number"
-              min={15}
-              max={180}
-              step={15}
-              {...register("durationMinutes")}
-            />
-            {errors.durationMinutes && (
-              <p className="text-xs text-destructive">
-                {errors.durationMinutes.message}
               </p>
             )}
           </div>
@@ -238,34 +199,24 @@ export function CandidateDetailPage() {
     register,
     handleSubmit,
     reset,
-    setValue,
-    watch,
     setError,
     formState: { errors, isDirty },
-  } = useForm<{ fullName: string; phone: string; status: CandidateStatus }>({
+  } = useForm<{ fullName: string; phone: string }>({
     values: candidate
       ? {
           fullName: candidate.fullName,
           phone: candidate.phone ?? "",
-          status: candidate.status,
         }
       : undefined,
   });
 
-  const currentStatus = watch("status");
-
   // ── Mutations ──────────────────────────────────────────────────────────────
 
   const updateMutation = useMutation({
-    mutationFn: (data: {
-      fullName: string;
-      phone: string;
-      status: CandidateStatus;
-    }) =>
+    mutationFn: (data: { fullName: string; phone: string }) =>
       candidatesApi.update(candidateId!, {
         fullName: data.fullName,
         phone: data.phone || undefined,
-        status: data.status,
       }),
     onSuccess() {
       toast.success("Candidate updated.");
@@ -276,7 +227,7 @@ export function CandidateDetailPage() {
       if (error instanceof AppError && error.fieldErrors) {
         Object.entries(error.fieldErrors).forEach(([field, msg]) => {
           setError(
-            field as "fullName" | "phone" | "status",
+            field as "fullName" | "phone",
             { message: msg },
           );
         });
@@ -355,7 +306,7 @@ export function CandidateDetailPage() {
     <div className="space-y-6">
       <PageHeader
         title={candidate.fullName}
-        description={`Applying for ${candidate.jobTitle}`}
+        description={`Job ${candidate.jobOpeningId.slice(0, 8)}…`}
         actions={
           <div className="flex gap-2">
             <Button
@@ -426,7 +377,7 @@ export function CandidateDetailPage() {
               {!editing ? (
                 <>
                   <div className="flex items-center gap-2">
-                    <StatusBadge kind="candidate" status={candidate.status} />
+                    <StatusBadge kind="pipeline" status={candidate.resumeExtractionStatus} />
                   </div>
                   <dl className="grid gap-3 sm:grid-cols-2">
                     <div>
@@ -471,37 +422,6 @@ export function CandidateDetailPage() {
                 </>
               ) : (
                 <div className="space-y-4">
-                  {/* Status */}
-                  <div className="space-y-1.5">
-                    <Label>Status</Label>
-                    <Select
-                      value={currentStatus}
-                      onValueChange={(v) =>
-                        setValue("status", v as CandidateStatus, {
-                          shouldDirty: true,
-                        })
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {CANDIDATE_STATUSES.map((s) => (
-                          <SelectItem key={s} value={s}>
-                            {s
-                              .replace(/_/g, " ")
-                              .charAt(0)
-                              .toUpperCase() +
-                              s
-                                .replace(/_/g, " ")
-                                .slice(1)
-                                .toLowerCase()}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
                   <div className="space-y-1.5">
                     <Label htmlFor="fullName">Full name</Label>
                     <Input id="fullName" {...register("fullName")} />
@@ -552,10 +472,12 @@ export function CandidateDetailPage() {
                     >
                       <div>
                         <p className="text-sm font-medium">
-                          {formatDateTime(s.scheduledAt)}
+                          {s.scheduledAt ? formatDateTime(s.scheduledAt) : "—"}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {s.durationMinutes} min · {s.jobTitle}
+                          {s.durationSeconds != null
+                            ? `${Math.round(s.durationSeconds / 60)} min`
+                            : ""}
                         </p>
                       </div>
                       <StatusBadge kind="session" status={s.status} />
@@ -603,7 +525,7 @@ export function CandidateDetailPage() {
                     ) : (
                       <>
                         <Upload className="mr-2 h-4 w-4" />
-                        {candidate.resumeKey
+                        {candidate.resumeS3Key
                           ? "Replace Resume"
                           : "Upload Resume"}
                       </>
@@ -611,7 +533,7 @@ export function CandidateDetailPage() {
                   </span>
                 </Button>
               </label>
-              {candidate.resumeKey && uploadProgress === null && (
+              {candidate.resumeS3Key && uploadProgress === null && (
                 <p className="mt-2 text-center text-xs text-green-600">
                   ✓ Resume on file
                 </p>
@@ -659,6 +581,7 @@ export function CandidateDetailPage() {
         open={scheduleOpen}
         onOpenChange={setScheduleOpen}
         candidateId={candidate.id}
+        jobOpeningId={candidate.jobOpeningId}
         candidateName={candidate.fullName}
       />
     </div>

@@ -38,6 +38,7 @@ spring:
     # Strict settings — no baseline, no out-of-order in production
     baseline-on-migrate: false
     out-of-order:        false
+    clean-disabled:      true   # SAFETY: destroy-all can never be triggered in prod
 
   # ── Spring AI ─────────────────────────────────────────────────────────────
   ai:

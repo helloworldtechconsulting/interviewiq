@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.interviewiq.auth.service.TokenService;
 import com.interviewiq.auth.web.filter.CandidateTokenAuthFilter;
 import com.interviewiq.auth.web.filter.JwtAuthenticationFilter;
+import com.interviewiq.auth.web.filter.OnboardRateLimitFilter;
 import com.interviewiq.auth.web.filter.RateLimitFilter;
 import com.interviewiq.shared.dto.ApiErrorResponse;
 import jakarta.servlet.http.HttpServletResponse;
@@ -73,6 +74,20 @@ public class SecurityConfig {
     @Value("${app.security.rate-limit.refill-duration:PT1M}")
     private Duration rateLimitRefillDuration;
 
+    // ── Onboarding-specific rate limit (POST /api/v1/companies/register) ──────
+
+    /** Max burst for company creation per IP before 429. */
+    @Value("${app.security.onboard-rate-limit.capacity:3}")
+    private int onboardRateLimitCapacity;
+
+    /** Tokens refilled per window for company creation. */
+    @Value("${app.security.onboard-rate-limit.refill-tokens:3}")
+    private int onboardRateLimitRefillTokens;
+
+    /** Refill window for company creation — 30 minutes by default. */
+    @Value("${app.security.onboard-rate-limit.refill-duration:PT30M}")
+    private Duration onboardRateLimitRefillDuration;
+
     private final TokenService tokenService;
     private final ObjectMapper objectMapper;
 
@@ -137,10 +152,16 @@ public class SecurityConfig {
         JwtAuthenticationFilter jwtFilter =
                 new JwtAuthenticationFilter(tokenService, objectMapper);
 
-        // Rate limiting on auth endpoints — protects OTP brute-force and credential stuffing.
-        // Not a @Bean so it is NOT registered as a servlet-level filter (same reason as JwtFilter).
+        // General rate limiting — protects OTP brute-force and credential stuffing.
+        // Not a @Bean so it is NOT registered as a servlet-level filter.
         RateLimitFilter rateLimitFilter = new RateLimitFilter(
                 rateLimitCapacity, rateLimitRefillTokens, rateLimitRefillDuration, objectMapper);
+
+        // Stricter rate limiting scoped only to POST /api/v1/companies/register.
+        // Runs before the general filter — 3 per 30 min per IP.
+        OnboardRateLimitFilter onboardRateLimitFilter = new OnboardRateLimitFilter(
+                onboardRateLimitCapacity, onboardRateLimitRefillTokens,
+                onboardRateLimitRefillDuration, objectMapper);
 
         return http
                 .securityMatcher("/api/v1/**", "/actuator/**", "/v3/api-docs/**",
@@ -157,6 +178,7 @@ public class SecurityConfig {
                         // OpenAPI / Swagger UI — permit in all environments; restrict in prod via network policy
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         .anyRequest().authenticated())
+                .addFilterBefore(onboardRateLimitFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(rateLimitFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
                 .exceptionHandling(ex -> ex

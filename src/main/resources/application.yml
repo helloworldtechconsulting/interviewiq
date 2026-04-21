@@ -133,6 +133,10 @@ app:
       capacity: 20          # max burst (tokens per bucket)
       refill-tokens: 10     # tokens added per refill window
       refill-duration: PT1M # refill window (ISO-8601 duration)
+    onboard-rate-limit:
+      capacity: 3           # max burst for POST /api/v1/companies/register per IP
+      refill-tokens: 3      # tokens added per refill window
+      refill-duration: PT30M # 30-minute refill — 3 new companies per 30 min max
   aws:
     region: ap-south-1
     s3-bucket: ""
