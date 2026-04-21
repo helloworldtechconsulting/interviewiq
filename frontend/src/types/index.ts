@@ -80,8 +80,30 @@ export type SuppressionReason = "BOUNCE" | "COMPLAINT" | "MANUAL";
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
-export interface RegisterRequest {
+/**
+ * POST /api/v1/companies/register — atomically creates company + admin user + wallet.
+ * Matches CompanyOnboardRequest.java fields exactly.
+ */
+export interface CompanyOnboardRequest {
   companyName: string;
+  slug?: string;        // optional — auto-generated from companyName when omitted
+  domain?: string;      // optional corporate email domain
+  adminName: string;    // ← backend field is adminName, NOT fullName
+  email: string;
+  password: string;
+}
+
+/** Response from POST /api/v1/companies/register */
+export interface OnboardResponse {
+  slug: string;   // company slug — needed for all subsequent /api/v1/{slug}/auth/* calls
+  email: string;
+}
+
+/**
+ * POST /api/v1/{slug}/auth/register — adds a new user to an EXISTING company.
+ * Only used for team-member self-registration, NOT for onboarding a new company.
+ */
+export interface RegisterRequest {
   fullName: string;
   email: string;
   password: string;
