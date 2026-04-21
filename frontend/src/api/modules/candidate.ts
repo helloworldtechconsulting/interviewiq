@@ -1,13 +1,13 @@
 // Candidate interview room API — uses candidateClient (invite token from URL)
 import { candidateClient } from "@/api/client";
-import type { CandidateQuestion, CandidateSession, SubmitAnswerRequest } from "@/types";
+import type { CandidateQuestion, Session, SubmitAnswerRequest } from "@/types";
 
 const BASE = "/api/v1/candidate";
 
 export const candidateRoomApi = {
-  getSession: (sessionId: string) =>
+  getSession: () =>
     candidateClient
-      .get<CandidateSession>(`${BASE}/sessions/${sessionId}`)
+      .get<Session>(`${BASE}/session`)
       .then((r) => r.data),
 
   getQuestions: (sessionId: string) =>

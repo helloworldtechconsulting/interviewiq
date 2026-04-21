@@ -19,6 +19,9 @@ public record JobResponse(
         EmploymentType employmentType,
         String         jdS3Key,
         PipelineStatus jdExtractionStatus,
+        String         description,
+        Integer        experienceMin,
+        Integer        experienceMax,
         JobStatus      status,
         OffsetDateTime createdAt,
         OffsetDateTime updatedAt
@@ -34,6 +37,9 @@ public record JobResponse(
                 job.getEmploymentType(),
                 job.getJdS3Key(),
                 job.getJdExtractionStatus(),
+                job.getDescription(),
+                job.getExperienceMin(),
+                job.getExperienceMax(),
                 job.getStatus(),
                 job.getCreatedAt(),
                 job.getUpdatedAt()

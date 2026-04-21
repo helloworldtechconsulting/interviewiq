@@ -129,6 +129,7 @@ public class SessionService {
         session.setCandidateId(req.candidateId());
         session.setStatus(SessionStatus.INVITED);
         session.setQuestionGenerationStatus(PipelineStatus.PENDING);
+        session.setScheduledAt(req.scheduledAt());
         session.setInviteExpiresAt(
                 OffsetDateTime.now(ZoneOffset.UTC)
                         .plus(securityProperties.getInvite().getExpiration()));
@@ -212,6 +213,7 @@ public class SessionService {
         }
 
         session.setStatus(SessionStatus.CANCELLED);
+        session.setCancelledAt(OffsetDateTime.now(ZoneOffset.UTC));
         sessionRepository.save(session);
         walletService.releaseFunds(session.getCompanyId(), sessionId);
 

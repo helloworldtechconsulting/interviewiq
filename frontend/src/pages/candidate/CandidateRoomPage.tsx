@@ -169,10 +169,10 @@ function WaitingScreen({
   sessionData,
   onStartAnswering,
 }: {
-  sessionData: ReturnType<typeof candidateRoomApi.getSession> extends Promise<infer T> ? T : never;
+  sessionData: import("@/types").Session;
   onStartAnswering: () => void;
 }) {
-  const countdown = useCountdown(sessionData.scheduledAt);
+  const countdown = useCountdown(sessionData.scheduledAt ?? undefined);
 
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-6 p-8 text-center">
@@ -183,11 +183,11 @@ function WaitingScreen({
       <div>
         <h2 className="text-2xl font-bold">Your interview starts soon</h2>
         <p className="mt-2 text-muted-foreground">
-          {sessionData.companyName} · {sessionData.jobTitle}
+          InterviewIQ AI Interview
         </p>
       </div>
 
-      {!countdown.isPast ? (
+      {sessionData.scheduledAt && !countdown.isPast ? (
         <div className="rounded-xl bg-muted px-8 py-4">
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
             Starts in
@@ -208,9 +208,9 @@ function WaitingScreen({
         </div>
       )}
 
-      {sessionData.meetUrl && (
+      {sessionData.googleMeetUrl && (
         <a
-          href={sessionData.meetUrl}
+          href={sessionData.googleMeetUrl}
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex items-center gap-2 rounded-lg bg-primary px-6 py-3 font-semibold text-primary-foreground transition-opacity hover:opacity-90"
@@ -407,7 +407,7 @@ function AnsweringScreen({
       {/* Header */}
       <div className="text-center">
         <p className="text-sm text-muted-foreground">
-          Interview — {candidateName}
+          AI Interview
         </p>
         <ProgressBar
           current={state.currentQuestionIndex + 1}
@@ -502,7 +502,7 @@ export function CandidateRoomPage() {
 
   const { data: session } = useQuery({
     queryKey: ["candidate", "session", sessionId],
-    queryFn: () => candidateRoomApi.getSession(sessionId!),
+    queryFn: () => candidateRoomApi.getSession(),
     enabled: !!sessionId && !!token,
     refetchInterval: (query) => {
       const status = query.state.data?.status;
@@ -603,7 +603,7 @@ export function CandidateRoomPage() {
         state={state}
         dispatch={dispatch}
         sessionId={sessionId!}
-        candidateName={session?.candidateName ?? "Candidate"}
+        candidateName={"Candidate"}
       />
     );
   }
@@ -614,7 +614,7 @@ export function CandidateRoomPage() {
 
   if (state.phase === "COMPLETED") {
     return (
-      <CompletedScreen candidateName={session?.candidateName ?? "Candidate"} />
+      <CompletedScreen candidateName={"Candidate"} />
     );
   }
 
@@ -634,9 +634,9 @@ export function CandidateRoomPage() {
     <div className="border-b bg-muted/30 px-6 py-3">
       <div className="mx-auto flex max-w-3xl items-center justify-between gap-4">
         <div>
-          <p className="text-sm font-semibold">{session.candidateName}</p>
-          <p className="text-xs text-muted-foreground">
-            {session.jobTitle} · {session.companyName}
+          <p className="text-sm font-semibold">InterviewIQ Session</p>
+          <p className="font-mono text-xs text-muted-foreground">
+            {session.jobOpeningId.slice(0, 8)}…
           </p>
         </div>
         <Badge
@@ -647,7 +647,11 @@ export function CandidateRoomPage() {
               "border-green-300 bg-green-50 text-green-700",
           )}
         >
-          {state.phase === "IN_PROGRESS" ? "● Live" : formatDateTime(session.scheduledAt)}
+          {state.phase === "IN_PROGRESS"
+            ? "● Live"
+            : session.scheduledAt
+            ? formatDateTime(session.scheduledAt)
+            : "Scheduled"}
         </Badge>
       </div>
     </div>
@@ -665,7 +669,7 @@ export function CandidateRoomPage() {
           }
         />
       ) : (
-        <InProgressScreen meetUrl={session.meetUrl} />
+        <InProgressScreen meetUrl={session.googleMeetUrl ?? undefined} />
       )}
     </div>
   );
