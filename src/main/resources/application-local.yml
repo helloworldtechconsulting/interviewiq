@@ -85,11 +85,6 @@ app:
     key-id:     rzp_test_local_stub
     key-secret: local_stub_secret
 
-  # Recall.ai — stub; no bot dispatch in local smoke tests
-  recall:
-    api-key:    recall_local_stub_key
-    webhook-secret: recall_local_webhook_secret
-
   # AWS — stub endpoint to prevent real S3/SES calls locally
   aws:
     region:           ap-south-1
