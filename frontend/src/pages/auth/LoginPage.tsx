@@ -52,7 +52,10 @@ export function LoginPage() {
   } = useForm<FormData>({ resolver: zodResolver(schema) });
 
   const mutation = useMutation({
-    mutationFn: authApi.login,
+    // Explicit wrapper — never pass authApi.login directly as mutationFn.
+    // Multi-parameter function references can receive React Query's internal
+    // context object as a second argument, corrupting the optional `slug` param.
+    mutationFn: (credentials: FormData) => authApi.login(credentials),
     onSuccess(data) {
       authStore.getState().setTokens(data.accessToken, data.refreshToken);
       navigate(from, { replace: true });

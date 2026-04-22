@@ -1,16 +1,29 @@
 package com.interviewiq.webhook.web;
 
 import com.interviewiq.webhook.service.WebhookService;
-import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * Inbound webhook receiver.
+ *
+ * <p>Recall.ai webhook endpoint ({@code POST /api/v1/webhooks/recall}) was removed
+ * in V038. Session lifecycle events are now driven by the browser directly via
+ * {@code /api/v1/candidate/interview/*} REST endpoints.
+ */
 @RestController
 @RequestMapping("/api/v1/webhooks")
-@RequiredArgsConstructor
 public class WebhookController {
 
     private final WebhookService webhookService;
+
+    public WebhookController(WebhookService webhookService) {
+        this.webhookService = webhookService;
+    }
 
     /**
      * Razorpay webhook — payment.captured credits wallet.
@@ -22,19 +35,6 @@ public class WebhookController {
             @RequestBody byte[] rawBody,
             @RequestHeader(value = "X-Razorpay-Signature", defaultValue = "") String signature) {
         webhookService.handleRazorpay(rawBody, signature);
-        return ResponseEntity.ok().build();
-    }
-
-    /**
-     * Recall.ai webhook — bot lifecycle events update session state.
-     * Signature header: X-Recall-Hmac-Signature
-     * Permit-all in SecurityConfig.
-     */
-    @PostMapping("/recall")
-    public ResponseEntity<Void> recall(
-            @RequestBody byte[] rawBody,
-            @RequestHeader(value = "X-Recall-Hmac-Signature", defaultValue = "") String signature) {
-        webhookService.handleRecall(rawBody, signature);
         return ResponseEntity.ok().build();
     }
 }

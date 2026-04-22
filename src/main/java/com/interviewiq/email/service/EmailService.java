@@ -16,6 +16,7 @@ import software.amazon.awssdk.services.ses.model.Destination;
 import software.amazon.awssdk.services.ses.model.Message;
 import software.amazon.awssdk.services.ses.model.SendEmailRequest;
 import software.amazon.awssdk.services.ses.model.SendEmailResponse;
+import software.amazon.awssdk.core.exception.SdkException;
 import software.amazon.awssdk.services.ses.model.SesException;
 
 import java.time.OffsetDateTime;
@@ -178,7 +179,15 @@ public class EmailService {
             log.debug("Email sent: to={} type={} messageId={}", recipientLower, emailType, response.messageId());
 
         } catch (SesException e) {
-            log.warn("SES send failed: to={} type={} error={}", recipientLower, emailType, e.getMessage());
+            // SES service error — invalid recipient, quota exceeded, etc.
+            log.warn("SES service error: to={} type={} error={}", recipientLower, emailType, e.getMessage());
+            event.setStatus(EmailStatus.FAILED);
+        } catch (SdkException e) {
+            // SDK client error — missing credentials, no network, endpoint unreachable.
+            // Common in local dev when AWS is not configured and use-local-stub is false.
+            // Log as WARN (not ERROR) — the request itself succeeded; only email delivery failed.
+            log.warn("SES client error (check AWS credentials or set use-local-stub=true): " +
+                     "to={} type={} error={}", recipientLower, emailType, e.getMessage());
             event.setStatus(EmailStatus.FAILED);
         }
 
