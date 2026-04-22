@@ -151,9 +151,6 @@ app:
   razorpay:
     key-id: ""
     key-secret: ""
-  recall:
-    api-key: ""
-    webhook-secret: ""
 
 # =============================================================================
 # springdoc-openapi — available at /swagger-ui.html and /v3/api-docs

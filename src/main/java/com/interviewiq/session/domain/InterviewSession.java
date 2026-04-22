@@ -59,14 +59,6 @@ public class InterviewSession {
     @Column(nullable = false)
     private OffsetDateTime inviteExpiresAt;
 
-    /** Recall.ai bot identifier, assigned asynchronously after bot.joined webhook. */
-    @Column(length = 255)
-    private String recallBotId;
-
-    /** Google Meet URL supplied to the Recall.ai bot to join the call. */
-    @Column(length = 512)
-    private String googleMeetUrl;
-
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 50)
     private SessionStatus status = SessionStatus.INVITED;
@@ -105,7 +97,7 @@ public class InterviewSession {
 
     /**
      * S3 object key for the session video recording (WebM).
-     * NULL until the Recall.ai bot uploads the recording.
+     * Uploaded by the browser via pre-signed PUT URL at session end.
      * S3 lifecycle auto-deletes after 7 days. Added V032.
      */
     @Column(name = "recording_s3_key", length = 512)
@@ -170,12 +162,6 @@ public class InterviewSession {
 
     public OffsetDateTime getInviteExpiresAt() { return inviteExpiresAt; }
     public void setInviteExpiresAt(OffsetDateTime inviteExpiresAt) { this.inviteExpiresAt = inviteExpiresAt; }
-
-    public String getRecallBotId() { return recallBotId; }
-    public void setRecallBotId(String recallBotId) { this.recallBotId = recallBotId; }
-
-    public String getGoogleMeetUrl() { return googleMeetUrl; }
-    public void setGoogleMeetUrl(String googleMeetUrl) { this.googleMeetUrl = googleMeetUrl; }
 
     public SessionStatus getStatus() { return status; }
     public void setStatus(SessionStatus status) { this.status = status; }

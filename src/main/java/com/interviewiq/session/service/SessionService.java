@@ -1,5 +1,9 @@
 package com.interviewiq.session.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.interviewiq.auth.service.TokenService;
 import com.interviewiq.billing.service.WalletService;
 import com.interviewiq.candidate.domain.Candidate;
@@ -11,8 +15,10 @@ import com.interviewiq.job.infrastructure.JobOpeningRepository;
 import com.interviewiq.session.domain.EvaluationReport;
 import com.interviewiq.session.domain.InterviewSession;
 import com.interviewiq.session.domain.SessionStatus;
+import com.interviewiq.session.dto.CompleteInterviewRequest;
 import com.interviewiq.session.dto.CreateSessionRequest;
 import com.interviewiq.session.dto.EvaluationReportResponse;
+import com.interviewiq.session.dto.InterviewInitResponse;
 import com.interviewiq.session.dto.SessionResponse;
 import com.interviewiq.session.infrastructure.EvaluationReportRepository;
 import com.interviewiq.session.infrastructure.InterviewSessionRepository;
@@ -22,7 +28,9 @@ import com.interviewiq.shared.domain.PipelineStatus;
 import com.interviewiq.shared.exception.ResourceNotFoundException;
 import com.interviewiq.shared.exception.SessionStateException;
 import com.interviewiq.shared.exception.ValidationException;
+import com.interviewiq.shared.security.CandidatePrincipal;
 import com.interviewiq.shared.security.SecurityContext;
+import com.interviewiq.storage.service.StorageService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -31,9 +39,13 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * Interview session lifecycle service.
@@ -49,6 +61,15 @@ import java.util.UUID;
  *   <li>Create a stub EvaluationReport (PENDING) to track AI pipeline state.</li>
  * </ol>
  *
+ * <h2>In-browser interview flow (PRD v3)</h2>
+ * <ol>
+ *   <li>{@link #initInterview()} — candidate opens the room; returns questions + pre-signed recording URL.</li>
+ *   <li>{@link #startInterview()} — browser calls when candidate confirms camera/mic; INVITED → STARTED.</li>
+ *   <li>{@link #completeInterview(CompleteInterviewRequest)} — browser calls after all questions; merges transcripts
+ *       into {@code questionsJson}, flips to COMPLETED, settles billing, triggers evaluation.</li>
+ *   <li>{@link #failInterview(String)} — browser calls on fatal error; sets ERROR state.</li>
+ * </ol>
+ *
  * <h2>Session cost</h2>
  * <p>Configurable via {@code app.billing.session-cost-paise} (default 5000 = ₹50).
  */
@@ -56,6 +77,9 @@ import java.util.UUID;
 public class SessionService {
 
     private static final Logger log = LoggerFactory.getLogger(SessionService.class);
+
+    /** Pre-signed S3 URL validity for the video recording upload. */
+    private static final Duration RECORDING_URL_EXPIRY = Duration.ofHours(2);
 
     private final InterviewSessionRepository sessionRepository;
     private final EvaluationReportRepository evaluationReportRepository;
@@ -66,6 +90,8 @@ public class SessionService {
     private final TokenService               tokenService;
     private final EmailService               emailService;
     private final SecurityProperties         securityProperties;
+    private final StorageService             storageService;
+    private final ObjectMapper               objectMapper;
 
     @Value("${app.billing.session-cost-paise:5000}")
     private long sessionCostPaise;
@@ -81,7 +107,9 @@ public class SessionService {
                           WalletService walletService,
                           TokenService tokenService,
                           EmailService emailService,
-                          SecurityProperties securityProperties) {
+                          SecurityProperties securityProperties,
+                          StorageService storageService,
+                          ObjectMapper objectMapper) {
         this.sessionRepository          = sessionRepository;
         this.evaluationReportRepository = evaluationReportRepository;
         this.jobOpeningRepository       = jobOpeningRepository;
@@ -91,6 +119,8 @@ public class SessionService {
         this.tokenService               = tokenService;
         this.emailService               = emailService;
         this.securityProperties         = securityProperties;
+        this.storageService             = storageService;
+        this.objectMapper               = objectMapper;
     }
 
     // =========================================================================
@@ -221,28 +251,6 @@ public class SessionService {
         return SessionResponse.from(session);
     }
 
-    /**
-     * Employer endpoint: sets the Google Meet URL for a session owned by the caller's company.
-     * Allowed while the session is INVITED or STARTED.
-     */
-    @Transactional
-    public SessionResponse setMeetUrl(UUID sessionId, String meetUrl) {
-        InterviewSession session = requireSession(sessionId);
-
-        if (session.getStatus() != SessionStatus.INVITED && session.getStatus() != SessionStatus.STARTED) {
-            throw new SessionStateException(
-                    "Cannot update meet URL for session in state " + session.getStatus());
-        }
-        if (meetUrl == null || meetUrl.isBlank()) {
-            throw new ValidationException("Google Meet URL must not be blank.");
-        }
-
-        session.setGoogleMeetUrl(meetUrl);
-        sessionRepository.save(session);
-        log.info("Meet URL set by employer: sessionId={}", sessionId);
-        return SessionResponse.from(session);
-    }
-
     @Transactional(readOnly = true)
     public EvaluationReportResponse getEvaluation(UUID sessionId) {
         UUID companyId = SecurityContext.requireCompanyId();
@@ -253,11 +261,11 @@ public class SessionService {
     }
 
     // =========================================================================
-    // Candidate-facing operations (called from candidate auth chain)
+    // Candidate-facing operations — session status
     // =========================================================================
 
     /**
-     * Returns the session for the authenticated candidate.
+     * Returns the session for the authenticated candidate (lightweight — no questions JSON).
      */
     @Transactional(readOnly = true)
     public SessionResponse getCandidateSession() {
@@ -267,26 +275,172 @@ public class SessionService {
         return SessionResponse.from(session);
     }
 
+    // =========================================================================
+    // Candidate-facing operations — in-browser interview room (PRD v3)
+    // =========================================================================
+
     /**
-     * Records the Google Meet URL for the session. Called by the candidate
-     * after they accept the invite and provide the meeting link.
+     * Initialises the interview room for the authenticated candidate.
+     *
+     * <p>Returns the full question set (only available after question generation
+     * completes), a pre-signed S3 PUT URL for the WebM recording, and session
+     * metadata for UI initialisation.
+     *
+     * <p>Pre-signed URL is generated regardless of session status so the browser
+     * can prepare the upload path before the interview starts. The URL validity
+     * window ({@link #RECORDING_URL_EXPIRY}) is 2 hours — enough for the longest
+     * expected interview.
+     */
+    @Transactional(readOnly = true)
+    public InterviewInitResponse initInterview() {
+        CandidatePrincipal principal = SecurityContext.requireCandidate();
+        UUID sessionId  = principal.sessionId();
+        UUID candidateId = principal.candidateId();
+
+        InterviewSession session = sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new ResourceNotFoundException("InterviewSession", sessionId));
+
+        // Compute the S3 key for the recording even if questions aren't ready yet
+        String recordingKey = "recordings/" + session.getCompanyId() + "/" + sessionId + ".webm";
+        String uploadUrl = storageService.generatePresignedUploadUrl(
+                recordingKey, "video/webm", RECORDING_URL_EXPIRY);
+
+        return new InterviewInitResponse(
+                session.getId(),
+                session.getStatus(),
+                session.getQuestionGenerationStatus(),
+                session.getQuestionsJson(),
+                uploadUrl,
+                recordingKey,
+                session.getScheduledAt(),
+                session.getInviteExpiresAt()
+        );
+    }
+
+    /**
+     * Transitions the session from INVITED → STARTED when the candidate confirms
+     * their camera/microphone are working and begins the interview.
+     *
+     * <p>Idempotent: calling this on an already-STARTED session is a no-op that
+     * returns the current session state. This handles browser refresh mid-interview.
      */
     @Transactional
-    public SessionResponse setCandidateMeetUrl(String googleMeetUrl) {
+    public SessionResponse startInterview() {
         UUID sessionId = SecurityContext.requireCandidate().sessionId();
         InterviewSession session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new ResourceNotFoundException("InterviewSession", sessionId));
 
-        if (session.getStatus() != SessionStatus.INVITED) {
+        if (session.getStatus() == SessionStatus.INVITED) {
+            session.setStatus(SessionStatus.STARTED);
+            session.setStartedAt(OffsetDateTime.now(ZoneOffset.UTC));
+            sessionRepository.save(session);
+            log.info("Interview started: sessionId={}", sessionId);
+        } else if (session.getStatus() != SessionStatus.STARTED) {
             throw new SessionStateException(
-                    "Cannot update meet URL for session in state " + session.getStatus());
-        }
-        if (googleMeetUrl == null || googleMeetUrl.isBlank()) {
-            throw new ValidationException("Google Meet URL must not be blank.");
+                    "Cannot start interview in current state: " + session.getStatus());
         }
 
-        session.setGoogleMeetUrl(googleMeetUrl);
+        return SessionResponse.from(session);
+    }
+
+    /**
+     * Completes the interview session after the candidate answers all questions.
+     *
+     * <p>This method:
+     * <ol>
+     *   <li>Merges browser transcripts into {@code questionsJson} as {@code "answer"} fields.</li>
+     *   <li>Persists anti-cheat proctoring flags as {@code proctoringFlagsJsonb}.</li>
+     *   <li>Records the S3 key of the uploaded video recording.</li>
+     *   <li>Transitions the session to COMPLETED.</li>
+     *   <li>Settles the billing reservation.</li>
+     *   <li>Marks the EvaluationReport as PENDING for the AI evaluation worker to pick up.</li>
+     * </ol>
+     */
+    @Transactional
+    public SessionResponse completeInterview(CompleteInterviewRequest req) {
+        UUID sessionId = SecurityContext.requireCandidate().sessionId();
+        InterviewSession session = sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new ResourceNotFoundException("InterviewSession", sessionId));
+
+        if (session.getStatus() != SessionStatus.STARTED) {
+            throw new SessionStateException(
+                    "Cannot complete interview in state " + session.getStatus() +
+                    ". Session must be STARTED.");
+        }
+
+        // Merge answers into questionsJson
+        String mergedJson = mergeAnswersIntoQuestionsJson(
+                session.getQuestionsJson(), req.answers());
+        session.setQuestionsJson(mergedJson);
+
+        // Persist anti-cheat flags
+        if (req.proctoringFlags() != null && !req.proctoringFlags().isEmpty()) {
+            try {
+                session.setProctoringFlagsJsonb(objectMapper.writeValueAsString(req.proctoringFlags()));
+            } catch (JsonProcessingException e) {
+                log.warn("Could not serialize proctoring flags for sessionId={}: {}", sessionId, e.getMessage());
+            }
+        }
+
+        // Record the S3 key of the uploaded video (if browser uploaded successfully)
+        if (req.recordingS3Key() != null && !req.recordingS3Key().isBlank()) {
+            session.setRecordingS3Key(req.recordingS3Key());
+        }
+
+        // Compute duration
+        if (session.getStartedAt() != null) {
+            long durationSecs = java.time.Duration.between(
+                    session.getStartedAt(), OffsetDateTime.now(ZoneOffset.UTC)).toSeconds();
+            session.setDurationSeconds((int) Math.max(0, durationSecs));
+        }
+
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        session.setStatus(SessionStatus.COMPLETED);
+        session.setEndedAt(now);
         sessionRepository.save(session);
+
+        // Settle billing
+        walletService.settleFunds(session.getCompanyId(), sessionId, sessionCostPaise);
+
+        // Trigger evaluation pipeline — mark the existing PENDING stub report as ready
+        evaluationReportRepository
+                .findByCompanyIdAndSessionId(session.getCompanyId(), sessionId)
+                .ifPresent(report -> {
+                    // Reset to PENDING so the EvaluationWorker picks it up on the next poll
+                    report.setGenerationStatus(PipelineStatus.PENDING);
+                    evaluationReportRepository.save(report);
+                });
+
+        log.info("Interview completed: sessionId={} durationSeconds={}", sessionId, session.getDurationSeconds());
+        return SessionResponse.from(session);
+    }
+
+    /**
+     * Marks the session as ERROR when the browser encounters a fatal issue
+     * (e.g. camera access revoked, network disconnected mid-interview).
+     * Releases the billing reservation.
+     */
+    @Transactional
+    public SessionResponse failInterview(String errorReason) {
+        UUID sessionId = SecurityContext.requireCandidate().sessionId();
+        InterviewSession session = sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new ResourceNotFoundException("InterviewSession", sessionId));
+
+        if (session.getStatus() == SessionStatus.COMPLETED
+                || session.getStatus() == SessionStatus.CANCELLED
+                || session.getStatus() == SessionStatus.ERROR) {
+            // Already in a terminal state — idempotent, no-op
+            return SessionResponse.from(session);
+        }
+
+        session.setStatus(SessionStatus.ERROR);
+        session.setErrorCode("BROWSER_ERROR");
+        session.setErrorMessage(errorReason != null ? errorReason : "Unknown browser error");
+        session.setEndedAt(OffsetDateTime.now(ZoneOffset.UTC));
+        sessionRepository.save(session);
+
+        walletService.releaseFunds(session.getCompanyId(), sessionId);
+        log.warn("Interview failed: sessionId={} reason={}", sessionId, errorReason);
         return SessionResponse.from(session);
     }
 
@@ -311,5 +465,48 @@ public class SessionService {
         UUID companyId = SecurityContext.requireCompanyId();
         return sessionRepository.findByCompanyIdAndId(companyId, sessionId)
                 .orElseThrow(() -> new ResourceNotFoundException("InterviewSession", sessionId));
+    }
+
+    /**
+     * Merges browser-captured transcripts into the existing {@code questionsJson}.
+     *
+     * <p>The questions are matched by their 1-based {@code "order"} field.
+     * Each matched question node gets an {@code "answer"} field set to the
+     * candidate's spoken transcript for that question.
+     *
+     * <p>Questions with no matching answer entry are left unchanged (answer
+     * field will be absent — the evaluator treats missing answers as blank).
+     */
+    private String mergeAnswersIntoQuestionsJson(
+            String questionsJson,
+            List<CompleteInterviewRequest.QuestionAnswer> answers) {
+
+        if (questionsJson == null || questionsJson.isBlank() || answers == null || answers.isEmpty()) {
+            return questionsJson;
+        }
+
+        try {
+            // Build a lookup: questionOrder → transcript
+            Map<Integer, String> answerByOrder = answers.stream()
+                    .collect(Collectors.toMap(
+                            CompleteInterviewRequest.QuestionAnswer::questionOrder,
+                            a -> a.transcript() != null ? a.transcript() : "",
+                            (a, b) -> a));
+
+            ArrayNode questions = (ArrayNode) objectMapper.readTree(questionsJson);
+            for (int i = 0; i < questions.size(); i++) {
+                ObjectNode q = (ObjectNode) questions.get(i);
+                int order = q.path("order").asInt(i + 1);
+                String transcript = answerByOrder.get(order);
+                if (transcript != null) {
+                    q.put("answer", transcript);
+                }
+            }
+            return objectMapper.writeValueAsString(questions);
+
+        } catch (JsonProcessingException e) {
+            log.error("Failed to merge answers into questionsJson: {}", e.getMessage());
+            return questionsJson; // return unchanged on error; evaluator will see missing answers
+        }
     }
 }

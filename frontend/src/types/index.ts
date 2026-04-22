@@ -316,8 +316,6 @@ export interface Session {
   candidateId: string;
   status: SessionStatus;
   questionGenerationStatus: PipelineStatus;
-  googleMeetUrl: string | null;
-  recallBotId: string | null;
   scheduledAt: string | null;
   inviteExpiresAt: string;
   startedAt: string | null;
@@ -330,6 +328,31 @@ export interface Session {
   errorCode: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * Mirrors InterviewInitResponse.java — returned by
+ * GET /api/v1/candidate/interview/init
+ */
+export interface InterviewInitData {
+  sessionId: string;
+  status: SessionStatus;
+  questionGenerationStatus: PipelineStatus;
+  /** JSON array of question objects with optional "answer" field. Null until generation completes. */
+  questionsJson: string | null;
+  recordingUploadUrl: string;
+  recordingS3Key: string;
+  scheduledAt: string | null;
+  inviteExpiresAt: string;
+}
+
+/** One question object parsed from InterviewInitData.questionsJson */
+export interface InterviewQuestion {
+  order: number;
+  text: string;
+  dimension: string;
+  difficulty?: string;
+  answer?: string;
 }
 
 /** Mirrors CreateSessionRequest.java */
