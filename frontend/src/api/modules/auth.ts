@@ -28,7 +28,11 @@ const DEFAULT_SLUG = import.meta.env.VITE_COMPANY_SLUG ?? "interviewiq-dev";
 
 /** Returns the base auth path for a given slug (or the deployment default). */
 function base(slug?: string) {
-  return `/api/v1/${slug ?? DEFAULT_SLUG}/auth`;
+  // Guard: slug must be a non-empty string — reject anything else (objects,
+  // numbers, empty strings) so a stray React Query context argument can never
+  // silently corrupt the URL with "[object Object]".
+  const resolved = typeof slug === "string" && slug.length > 0 ? slug : DEFAULT_SLUG;
+  return `/api/v1/${resolved}/auth`;
 }
 
 export const authApi = {
