@@ -68,6 +68,30 @@ public class Candidate {
     @Column(length = 30)
     private String phone;
 
+    // ── Google identity (V039) ─────────────────────────────────────────────────
+
+    /**
+     * Google account subject ({@code sub} claim) — stable, immutable per Google account.
+     * Null until the candidate completes Google identity verification via
+     * {@code POST /api/v1/candidate/auth/google}.
+     */
+    @Column(length = 255)
+    private String googleSubject;
+
+    /**
+     * Email address from the verified Google ID token.
+     * May differ from {@link #email} (the invite email).
+     */
+    @Column(length = 255)
+    private String googleEmail;
+
+    /**
+     * True once {@code CandidateAuthController} has successfully verified
+     * the candidate's Google ID token. Defaults to false.
+     */
+    @Column(nullable = false)
+    private boolean googleVerified = false;
+
     @Column(nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 
@@ -114,6 +138,15 @@ public class Candidate {
 
     public String getPhone() { return phone; }
     public void setPhone(String phone) { this.phone = phone; }
+
+    public String getGoogleSubject() { return googleSubject; }
+    public void setGoogleSubject(String googleSubject) { this.googleSubject = googleSubject; }
+
+    public String getGoogleEmail() { return googleEmail; }
+    public void setGoogleEmail(String googleEmail) { this.googleEmail = googleEmail; }
+
+    public boolean isGoogleVerified() { return googleVerified; }
+    public void setGoogleVerified(boolean googleVerified) { this.googleVerified = googleVerified; }
 
     public OffsetDateTime getCreatedAt() { return createdAt; }
     public OffsetDateTime getUpdatedAt() { return updatedAt; }

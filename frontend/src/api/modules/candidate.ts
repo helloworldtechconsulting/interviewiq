@@ -94,4 +94,18 @@ export const candidateRoomApi = {
       return false;
     }
   },
+
+  /**
+   * Verifies the candidate's Google identity by submitting a Google ID token.
+   *
+   * POST /api/v1/candidate/auth/google
+   *
+   * Requires an active invite token (handled by the candidate security chain).
+   * Sets googleVerified = true on the candidate record. The frontend should
+   * call this during the GOOGLE_AUTH phase before allowing the setup phase.
+   */
+  googleVerify: (idToken: string) =>
+    candidateClient
+      .post(`${BASE}/auth/google`, { idToken })
+      .then(() => undefined),
 };

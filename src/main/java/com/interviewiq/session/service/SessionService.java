@@ -305,6 +305,11 @@ public class SessionService {
         String uploadUrl = storageService.generatePresignedUploadUrl(
                 recordingKey, "video/webm", RECORDING_URL_EXPIRY);
 
+        // Check whether the candidate has already verified their Google identity
+        boolean googleVerified = candidateRepository.findById(candidateId)
+                .map(Candidate::isGoogleVerified)
+                .orElse(false);
+
         return new InterviewInitResponse(
                 session.getId(),
                 session.getStatus(),
@@ -313,7 +318,8 @@ public class SessionService {
                 uploadUrl,
                 recordingKey,
                 session.getScheduledAt(),
-                session.getInviteExpiresAt()
+                session.getInviteExpiresAt(),
+                googleVerified
         );
     }
 

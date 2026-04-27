@@ -118,7 +118,7 @@ class AuthControllerTest {
                         true, true, java.time.OffsetDateTime.now(),
                         java.time.OffsetDateTime.now())
         );
-        when(authService.login(eq(SLUG), any())).thenReturn(response);
+        when(authService.login(eq(SLUG), any(), any())).thenReturn(response);
 
         mockMvc.perform(post("/api/v1/{slug}/auth/login", SLUG)
                         .contentType(MediaType.APPLICATION_JSON)

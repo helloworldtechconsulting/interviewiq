@@ -171,6 +171,8 @@ public class SecurityConfig {
                         sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/v1/*/auth/**").permitAll()
+                        // Google OAuth register — no slug in path (company doesn't exist yet)
+                        .requestMatchers("/api/v1/auth/google/**").permitAll()
                         .requestMatchers("/api/v1/companies/register").permitAll()
                         .requestMatchers("/api/v1/companies/check-slug").permitAll()
                         .requestMatchers("/api/v1/webhooks/**").permitAll()

@@ -63,6 +63,7 @@ import {
   type QuestionAnswer,
   type ProctoringFlagPayload,
 } from "@/api/modules/candidate";
+import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn, formatDateTime } from "@/lib/utils";
@@ -92,6 +93,7 @@ type RoomPhase =
   | "CHECKING"      // initial load: checking browser support + fetching init data
   | "INCOMPATIBLE"  // browser doesn't support required APIs
   | "WAITING"       // questions not ready yet (still generating) or interview hasn't started
+  | "GOOGLE_AUTH"   // candidate must verify Google identity before setup
   | "SETUP"         // questions loaded, asking for camera/mic permission
   | "READY"         // camera/mic granted, camera preview shown, ready to begin
   | "SPEAKING"      // TTS is reading the current question aloud
@@ -417,6 +419,19 @@ export function CandidateRoomPage() {
     },
   });
 
+  // ── Google identity verify mutation ─────────────────────────────────────────
+
+  const googleVerifyMutation = useMutation({
+    mutationFn: (idToken: string) => candidateRoomApi.googleVerify(idToken),
+    onSuccess: () => {
+      // Google identity confirmed — proceed to camera/mic setup
+      dispatch({ type: "SET_PHASE", phase: "SETUP" });
+    },
+    onError: () => {
+      toast.error("Google verification failed. Please try again.");
+    },
+  });
+
   // ── Browser compatibility + init data processing ──────────────────────────
 
   useEffect(() => {
@@ -477,8 +492,14 @@ export function CandidateRoomPage() {
         }
       });
     } else {
-      // INVITED — show setup screen (camera permission request)
-      dispatch({ type: "SET_PHASE", phase: "SETUP" });
+      // INVITED — check Google identity requirement before camera setup
+      if (initData.googleVerified === false) {
+        // Candidate needs to verify their Google identity first
+        dispatch({ type: "SET_PHASE", phase: "GOOGLE_AUTH" });
+      } else {
+        // Google already verified (or not required) — proceed to camera setup
+        dispatch({ type: "SET_PHASE", phase: "SETUP" });
+      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initData, token]);
@@ -797,6 +818,38 @@ export function CandidateRoomPage() {
 
   if (state.phase === "COMPLETED") {
     return <CompletedScreen />;
+  }
+
+  // ── GOOGLE_AUTH — candidate must verify Google identity ────────────────────
+
+  if (state.phase === "GOOGLE_AUTH") {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-8 p-8 text-center">
+        <div>
+          <h2 className="text-2xl font-bold">Verify your identity</h2>
+          <p className="mt-2 text-muted-foreground max-w-md">
+            This interview requires you to verify your identity with your Google account
+            before proceeding. This ensures the results are attributed to you.
+          </p>
+        </div>
+
+        <div className="w-full max-w-xs">
+          <GoogleSignInButton
+            text="continue_with"
+            onSuccess={(idToken) => googleVerifyMutation.mutate(idToken)}
+            onError={() => toast.error("Google sign-in failed. Please try again.")}
+            disabled={googleVerifyMutation.isPending}
+          />
+        </div>
+
+        {googleVerifyMutation.isPending && (
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span className="text-sm">Verifying…</span>
+          </div>
+        )}
+      </div>
+    );
   }
 
   // ── SETUP — camera permission request ──────────────────────────────────────

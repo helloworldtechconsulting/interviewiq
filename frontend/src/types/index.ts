@@ -344,6 +344,12 @@ export interface InterviewInitData {
   recordingS3Key: string;
   scheduledAt: string | null;
   inviteExpiresAt: string;
+  /**
+   * True when the candidate has already verified their Google identity for this session.
+   * False means the GOOGLE_AUTH phase must be shown before setup.
+   * Populated by the backend from the candidate's googleVerified field.
+   */
+  googleVerified: boolean;
 }
 
 /** One question object parsed from InterviewInitData.questionsJson */

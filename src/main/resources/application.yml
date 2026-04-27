@@ -129,6 +129,14 @@ app:
     invite:
       secret: ""
       expiration: 7d
+    google:
+      # OAuth 2.0 Client ID from Google Cloud Console.
+      # Override per environment — inject in prod as APP_SECURITY_GOOGLE_CLIENT_ID.
+      client-id: ""
+    login-attempt:
+      max-failures: 5          # lock after this many failed logins from one IP
+      window-duration: PT1M    # sliding window for counting failures
+      lockout-duration: PT15M  # how long the IP is blocked after max-failures
     rate-limit:
       capacity: 20          # max burst (tokens per bucket)
       refill-tokens: 10     # tokens added per refill window

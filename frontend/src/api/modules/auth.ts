@@ -94,4 +94,27 @@ export const authApi = {
       .post(`${base()}/logout`, { refreshToken })
       .then(() => undefined);
   },
+
+  /**
+   * Google OAuth login within a known company.
+   *
+   * POST /api/v1/{slug}/auth/google
+   * Logs in or auto-creates an account using the Google ID token credential.
+   */
+  googleLogin: (idToken: string, slug?: string) =>
+    apiClient
+      .post<AuthResponse>(`${base(slug)}/google`, { idToken })
+      .then((r) => r.data),
+
+  /**
+   * Google OAuth company registration (brand-new company).
+   *
+   * POST /api/v1/auth/google/register
+   * Creates a new company + admin account using the Google ID token.
+   * No slug required — the company does not exist yet.
+   */
+  googleRegister: (idToken: string, companyName: string) =>
+    apiClient
+      .post<AuthResponse>("/api/v1/auth/google/register", { idToken, companyName })
+      .then((r) => r.data),
 };
