@@ -115,7 +115,8 @@ class AuthControllerTest {
                 "refresh-uuid",
                 new UserResponse(UUID.randomUUID(), UUID.randomUUID(),
                         "Alice Smith", "alice@example.com", UserRole.ADMIN,
-                        true, true, java.time.OffsetDateTime.now())
+                        true, true, java.time.OffsetDateTime.now(),
+                        java.time.OffsetDateTime.now())
         );
         when(authService.login(eq(SLUG), any())).thenReturn(response);
 

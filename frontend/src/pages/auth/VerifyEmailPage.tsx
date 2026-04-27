@@ -47,9 +47,13 @@ export function VerifyEmailPage() {
   const location = useLocation();
   const user = useAuthUser();
 
-  // Email may be passed via router state (from login 403 redirect) or from JWT
-  const email =
-    (location.state as { email?: string } | null)?.email ?? user?.email ?? "";
+  // `email` and `slug` may be passed via router state:
+  //   • from OnboardingPage after a new company is created  → { email, slug }
+  //   • from LoginPage after a 403 email-not-verified redirect → { email }
+  // `slug` must match the company — fall back to the deployment env-var default.
+  const state = location.state as { email?: string; slug?: string } | null;
+  const email = state?.email ?? user?.email ?? "";
+  const slug = state?.slug; // undefined → authApi falls back to VITE_COMPANY_SLUG
 
   const [resendCooldown, setResendCooldown] = useState(0);
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -83,7 +87,7 @@ export function VerifyEmailPage() {
 
   const verifyMutation = useMutation({
     mutationFn: (data: FormData) =>
-      authApi.verifyEmail({ email, otp: data.otp }),
+      authApi.verifyEmail({ email, otp: data.otp }, slug),
     onSuccess(data) {
       authStore.getState().setTokens(data.accessToken, data.refreshToken);
       toast.success("Email verified! Welcome aboard.");
@@ -105,7 +109,7 @@ export function VerifyEmailPage() {
   });
 
   const resendMutation = useMutation({
-    mutationFn: () => authApi.resendVerification({ email }),
+    mutationFn: () => authApi.resendVerification({ email }, slug),
     onSuccess() {
       toast.success("A new OTP has been sent to your email.");
       startCooldown();

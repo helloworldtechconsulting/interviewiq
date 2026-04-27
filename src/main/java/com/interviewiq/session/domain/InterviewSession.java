@@ -45,20 +45,19 @@ public class InterviewSession {
     @Column(nullable = false, updatable = false)
     private UUID candidateId;
 
+    /**
+     * Target interview time set by the recruiter at session creation.
+     * Shown to the candidate: "Your interview is scheduled for April 20 at 3:00 PM IST".
+     * NULL for sessions created before V033. Added V033.
+     */
+    private OffsetDateTime scheduledAt;
+
     /** BCrypt hash of the invite token. Raw token is never stored. */
     @Column(nullable = false, unique = true, length = 255)
     private String inviteTokenHash;
 
     @Column(nullable = false)
     private OffsetDateTime inviteExpiresAt;
-
-    /** Recall.ai bot identifier, assigned asynchronously after bot.joined webhook. */
-    @Column(length = 255)
-    private String recallBotId;
-
-    /** Google Meet URL supplied to the Recall.ai bot to join the call. */
-    @Column(length = 512)
-    private String googleMeetUrl;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 50)
@@ -79,6 +78,44 @@ public class InterviewSession {
     private OffsetDateTime startedAt;
 
     private OffsetDateTime endedAt;
+
+    /**
+     * SHA-256 hash of the ephemeral WebSocket room token.
+     * Issued when the session transitions to STARTED; raw token never persisted. Added V032.
+     */
+    @Column(unique = true, length = 255)
+    private String roomTokenHash;
+
+    /** Expiry for the room token. Set/null alongside roomTokenHash. Added V032. */
+    private OffsetDateTime roomTokenExpiresAt;
+
+    /**
+     * Actual interview duration in seconds, computed from (endedAt − startedAt) at session-end.
+     * Stored explicitly to avoid recomputing on every query. Added V032.
+     */
+    private Integer durationSeconds;
+
+    /**
+     * S3 object key for the session video recording (WebM).
+     * Uploaded by the browser via pre-signed PUT URL at session end.
+     * S3 lifecycle auto-deletes after 7 days. Added V032.
+     */
+    @Column(name = "recording_s3_key", length = 512)
+    private String recordingS3Key;
+
+    /**
+     * Denormalised anti-cheat summary written by the evaluation pipeline after
+     * the session ends. JSON array of flag objects. Added V032.
+     * Structure: [{"type":"TAB_SWITCH","count":2,"firstOccurrence":"..."}]
+     */
+    @Column(name = "proctoring_flags_jsonb", columnDefinition = "jsonb")
+    private String proctoringFlagsJsonb;
+
+    /**
+     * Timestamp set when the session transitions to CANCELLED.
+     * Required for cancellation analytics and refund eligibility windows. Added V032.
+     */
+    private OffsetDateTime cancelledAt;
 
     /** Structured error code for ERROR state. E.g. BOT_JOIN_TIMEOUT. */
     @Column(length = 100)
@@ -126,12 +163,6 @@ public class InterviewSession {
     public OffsetDateTime getInviteExpiresAt() { return inviteExpiresAt; }
     public void setInviteExpiresAt(OffsetDateTime inviteExpiresAt) { this.inviteExpiresAt = inviteExpiresAt; }
 
-    public String getRecallBotId() { return recallBotId; }
-    public void setRecallBotId(String recallBotId) { this.recallBotId = recallBotId; }
-
-    public String getGoogleMeetUrl() { return googleMeetUrl; }
-    public void setGoogleMeetUrl(String googleMeetUrl) { this.googleMeetUrl = googleMeetUrl; }
-
     public SessionStatus getStatus() { return status; }
     public void setStatus(SessionStatus status) { this.status = status; }
 
@@ -141,11 +172,32 @@ public class InterviewSession {
     public String getQuestionsJson() { return questionsJson; }
     public void setQuestionsJson(String questionsJson) { this.questionsJson = questionsJson; }
 
+    public OffsetDateTime getScheduledAt() { return scheduledAt; }
+    public void setScheduledAt(OffsetDateTime scheduledAt) { this.scheduledAt = scheduledAt; }
+
     public OffsetDateTime getStartedAt() { return startedAt; }
     public void setStartedAt(OffsetDateTime startedAt) { this.startedAt = startedAt; }
 
     public OffsetDateTime getEndedAt() { return endedAt; }
     public void setEndedAt(OffsetDateTime endedAt) { this.endedAt = endedAt; }
+
+    public String getRoomTokenHash() { return roomTokenHash; }
+    public void setRoomTokenHash(String roomTokenHash) { this.roomTokenHash = roomTokenHash; }
+
+    public OffsetDateTime getRoomTokenExpiresAt() { return roomTokenExpiresAt; }
+    public void setRoomTokenExpiresAt(OffsetDateTime roomTokenExpiresAt) { this.roomTokenExpiresAt = roomTokenExpiresAt; }
+
+    public Integer getDurationSeconds() { return durationSeconds; }
+    public void setDurationSeconds(Integer durationSeconds) { this.durationSeconds = durationSeconds; }
+
+    public String getRecordingS3Key() { return recordingS3Key; }
+    public void setRecordingS3Key(String recordingS3Key) { this.recordingS3Key = recordingS3Key; }
+
+    public String getProctoringFlagsJsonb() { return proctoringFlagsJsonb; }
+    public void setProctoringFlagsJsonb(String proctoringFlagsJsonb) { this.proctoringFlagsJsonb = proctoringFlagsJsonb; }
+
+    public OffsetDateTime getCancelledAt() { return cancelledAt; }
+    public void setCancelledAt(OffsetDateTime cancelledAt) { this.cancelledAt = cancelledAt; }
 
     public String getErrorCode() { return errorCode; }
     public void setErrorCode(String errorCode) { this.errorCode = errorCode; }

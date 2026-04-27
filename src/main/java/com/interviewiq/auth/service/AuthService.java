@@ -177,6 +177,9 @@ public class AuthService {
             throw new AuthorizationException("Invalid credentials.");
         }
 
+        user.setLastLoginAt(OffsetDateTime.now(ZoneOffset.UTC));
+        userRepository.save(user);
+
         log.info("User logged in: userId={}", user.getId());
         return issueTokenPair(user);
     }

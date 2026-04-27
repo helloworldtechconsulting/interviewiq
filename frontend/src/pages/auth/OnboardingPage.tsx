@@ -1,5 +1,12 @@
 // =============================================================================
 // OnboardingPage.tsx — Register a new company + admin account
+//
+// Calls POST /api/v1/companies/register (companiesApi.onboard) which atomically
+// creates: company + first ADMIN user + empty wallet.
+//
+// On success the backend returns { slug, email }. The slug is stored in
+// navigation state so VerifyEmailPage can call /api/v1/{slug}/auth/verify-email
+// with the correct company context.
 // =============================================================================
 
 import { useForm } from "react-hook-form";
@@ -10,7 +17,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 
-import { authApi } from "@/api/modules/auth";
+import { companiesApi } from "@/api/modules/companies";
 import { AppError } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,7 +38,7 @@ const schema = z
     companyName: z
       .string()
       .min(2, "Company name must be at least 2 characters"),
-    fullName: z.string().min(2, "Full name must be at least 2 characters"),
+    adminName: z.string().min(2, "Full name must be at least 2 characters"),
     email: z.string().email("Invalid email address"),
     password: z
       .string()
@@ -60,17 +67,31 @@ export function OnboardingPage() {
   } = useForm<FormData>({ resolver: zodResolver(schema) });
 
   const mutation = useMutation({
-    mutationFn: authApi.register,
-    onSuccess(_, variables) {
-      toast.success("Account created! Please check your email for the verification code.");
-      navigate("/verify-email", { replace: true, state: { email: variables.email } });
+    mutationFn: (data: FormData) =>
+      companiesApi.onboard({
+        companyName: data.companyName,
+        adminName: data.adminName,   // ← matches CompanyOnboardRequest.adminName on the backend
+        email: data.email,
+        password: data.password,
+      }),
+    onSuccess(result) {
+      toast.success(
+        "Account created! Please check your email for the verification code.",
+      );
+      // Pass both email AND slug so VerifyEmailPage uses the right tenant context
+      navigate("/verify-email", {
+        replace: true,
+        state: { email: result.email, slug: result.slug },
+      });
     },
     onError(error) {
       if (error instanceof AppError) {
-        // Map backend field errors to RHF fields
         if (error.fieldErrors) {
           Object.entries(error.fieldErrors).forEach(([field, message]) => {
-            setError(field as keyof FormData, { message });
+            // Map backend field names to form field names
+            const formField =
+              field === "adminName" ? "adminName" : (field as keyof FormData);
+            setError(formField, { message: message as string });
           });
         } else {
           toast.error(error.message);
@@ -82,12 +103,7 @@ export function OnboardingPage() {
   });
 
   function onSubmit(data: FormData) {
-    mutation.mutate({
-      companyName: data.companyName,
-      fullName: data.fullName,
-      email: data.email,
-      password: data.password,
-    });
+    mutation.mutate(data);
   }
 
   return (
@@ -119,16 +135,16 @@ export function OnboardingPage() {
 
           {/* Full name */}
           <div className="space-y-1.5">
-            <Label htmlFor="fullName">Your full name</Label>
+            <Label htmlFor="adminName">Your full name</Label>
             <Input
-              id="fullName"
+              id="adminName"
               placeholder="Ravi Kumar"
               autoComplete="name"
-              {...register("fullName")}
+              {...register("adminName")}
             />
-            {errors.fullName && (
+            {errors.adminName && (
               <p className="text-xs text-destructive">
-                {errors.fullName.message}
+                {errors.adminName.message}
               </p>
             )}
           </div>

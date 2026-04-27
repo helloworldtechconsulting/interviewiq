@@ -69,6 +69,21 @@ public class WalletTransaction {
     @Column(length = 255, unique = true)
     private String razorpayOrderId;
 
+    /**
+     * Razorpay payment ID. Assigned by Razorpay after capture; arrives in the
+     * payment.captured webhook. Distinct from razorpayOrderId (created upfront).
+     * Required for refund API calls and payment reconciliation. Added V031.
+     */
+    @Column(name = "razorpay_payment_id", length = 255, unique = true)
+    private String razorpayPaymentId;
+
+    /**
+     * Human-readable transaction description shown in the billing history UI.
+     * Examples: "Wallet top-up", "Interview session reservation". Added V031.
+     */
+    @Column(length = 500)
+    private String description;
+
     @Column(nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 
@@ -105,6 +120,12 @@ public class WalletTransaction {
 
     public String getRazorpayOrderId() { return razorpayOrderId; }
     public void setRazorpayOrderId(String razorpayOrderId) { this.razorpayOrderId = razorpayOrderId; }
+
+    public String getRazorpayPaymentId() { return razorpayPaymentId; }
+    public void setRazorpayPaymentId(String razorpayPaymentId) { this.razorpayPaymentId = razorpayPaymentId; }
+
+    public String getDescription() { return description; }
+    public void setDescription(String description) { this.description = description; }
 
     public OffsetDateTime getCreatedAt() { return createdAt; }
 
