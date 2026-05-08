@@ -1,6 +1,8 @@
 package com.interviewiq.session.domain;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.UUID;
@@ -56,6 +58,7 @@ public class SessionEvent {
      * Optional — lifecycle events may carry no payload.
      * DB CHECK: must be a JSON object when present.
      */
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(columnDefinition = "jsonb")
     private String metadata;
 

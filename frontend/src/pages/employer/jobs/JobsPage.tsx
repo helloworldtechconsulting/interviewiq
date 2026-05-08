@@ -18,12 +18,13 @@ import {
   ChevronRight,
   Loader2,
   Search,
+  Clock,
 } from "lucide-react";
 
 import { jobsApi } from "@/api/modules/jobs";
 import { queryKeys } from "@/lib/queryKeys";
 import { AppError } from "@/api/client";
-import type { JobStatus, LocationType } from "@/types";
+import type { JobStatus, LocationType, EmploymentType } from "@/types";
 import { PageHeader } from "@/components/common/PageHeader";
 import { EmptyState } from "@/components/common/EmptyState";
 import { StatusBadge } from "@/components/common/StatusBadge";
@@ -55,8 +56,33 @@ const createJobSchema = z.object({
   title: z.string().min(2, "Job title must be at least 2 characters"),
   department: z.string().optional(),
   locationType: z.enum(["REMOTE", "ONSITE", "HYBRID"]).optional(),
+  employmentType: z
+    .enum(["FULL_TIME", "PART_TIME", "CONTRACT", "INTERNSHIP"])
+    .optional(),
   description: z.string().optional(),
-});
+  experienceMin: z.coerce
+    .number({ invalid_type_error: "Must be a number" })
+    .int()
+    .min(0, "Cannot be negative")
+    .optional()
+    .or(z.literal("")),
+  experienceMax: z.coerce
+    .number({ invalid_type_error: "Must be a number" })
+    .int()
+    .min(0, "Cannot be negative")
+    .optional()
+    .or(z.literal("")),
+}).refine(
+  (data) => {
+    const min = data.experienceMin;
+    const max = data.experienceMax;
+    if (min !== undefined && min !== "" && max !== undefined && max !== "") {
+      return Number(max) >= Number(min);
+    }
+    return true;
+  },
+  { message: "Max experience must be ≥ min experience", path: ["experienceMax"] },
+);
 
 type CreateJobForm = z.infer<typeof createJobSchema>;
 
@@ -114,7 +140,11 @@ function CreateJobDialog({ open, onOpenChange }: CreateJobDialogProps) {
   });
 
   function onSubmit(data: CreateJobForm) {
-    mutation.mutate(data);
+    mutation.mutate({
+      ...data,
+      experienceMin: data.experienceMin === "" ? undefined : data.experienceMin as number | undefined,
+      experienceMax: data.experienceMax === "" ? undefined : data.experienceMax as number | undefined,
+    });
   }
 
   return (
@@ -180,6 +210,63 @@ function CreateJobDialog({ open, onOpenChange }: CreateJobDialogProps) {
                   <SelectItem value="HYBRID">Hybrid</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+
+            {/* Employment Type */}
+            <div className="space-y-1.5">
+              <Label>Employment Type</Label>
+              <Select
+                value={watch("employmentType") ?? ""}
+                onValueChange={(v) =>
+                  setValue("employmentType", v as EmploymentType, {
+                    shouldDirty: true,
+                  })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select…" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="FULL_TIME">Full-time</SelectItem>
+                  <SelectItem value="PART_TIME">Part-time</SelectItem>
+                  <SelectItem value="CONTRACT">Contract</SelectItem>
+                  <SelectItem value="INTERNSHIP">Internship</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Experience Range */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="experienceMin">Min Experience (yrs)</Label>
+                <Input
+                  id="experienceMin"
+                  type="number"
+                  min={0}
+                  placeholder="0"
+                  {...register("experienceMin")}
+                />
+                {errors.experienceMin && (
+                  <p className="text-xs text-destructive">
+                    {errors.experienceMin.message}
+                  </p>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="experienceMax">Max Experience (yrs)</Label>
+                <Input
+                  id="experienceMax"
+                  type="number"
+                  min={0}
+                  placeholder="e.g. 5"
+                  {...register("experienceMax")}
+                />
+                {errors.experienceMax && (
+                  <p className="text-xs text-destructive">
+                    {errors.experienceMax.message}
+                  </p>
+                )}
+              </div>
             </div>
 
             {/* Description */}
@@ -338,6 +425,18 @@ export function JobsPage() {
                       <span className="flex items-center gap-1">
                         <MapPin className="h-3.5 w-3.5" />
                         {job.locationType}
+                      </span>
+                    )}
+                    {job.employmentType && (
+                      <span className="flex items-center gap-1">
+                        <Briefcase className="h-3.5 w-3.5" />
+                        {job.employmentType.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
+                      </span>
+                    )}
+                    {(job.experienceMin != null || job.experienceMax != null) && (
+                      <span className="flex items-center gap-1">
+                        <Clock className="h-3.5 w-3.5" />
+                        {job.experienceMin ?? 0}–{job.experienceMax ?? "∞"} yrs
                       </span>
                     )}
                   </div>

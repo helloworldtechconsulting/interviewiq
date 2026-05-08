@@ -2,6 +2,8 @@ package com.interviewiq.session.domain;
 
 import com.interviewiq.shared.domain.PipelineStatus;
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.UUID;
@@ -72,6 +74,7 @@ public class InterviewSession {
      * completes. Structure: [{"order":1,"text":"...","dimension":"TECHNICAL"}, ...]
      * NULL while questionGenerationStatus is PENDING, IN_PROGRESS, or FAILED.
      */
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(columnDefinition = "jsonb")
     private String questionsJson;
 
@@ -108,6 +111,7 @@ public class InterviewSession {
      * the session ends. JSON array of flag objects. Added V032.
      * Structure: [{"type":"TAB_SWITCH","count":2,"firstOccurrence":"..."}]
      */
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "proctoring_flags_jsonb", columnDefinition = "jsonb")
     private String proctoringFlagsJsonb;
 

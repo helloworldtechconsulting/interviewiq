@@ -2,6 +2,8 @@ package com.interviewiq.job.domain;
 
 import com.interviewiq.shared.domain.PipelineStatus;
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.UUID;
@@ -95,6 +97,7 @@ public class JobOpening {
      * Structure: [{"id":"...","text":"...","dimension":"TECHNICAL"}, ...]
      * Added V029.
      */
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "questions_jsonb", columnDefinition = "jsonb")
     private String questionsJsonb;
 
