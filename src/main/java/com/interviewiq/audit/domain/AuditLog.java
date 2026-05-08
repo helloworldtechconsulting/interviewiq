@@ -7,6 +7,8 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -58,6 +60,7 @@ public class AuditLog {
     private UUID entityId;
 
     /** Optional structured context as a JSON string (stored as JSONB). */
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(columnDefinition = "jsonb", updatable = false)
     private String detailsJson;
 

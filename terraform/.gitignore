@@ -1,0 +1,24 @@
+# Terraform state and local files — NEVER commit these
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.backup
+*.tfplan
+tfplan
+plan_output.txt
+
+# Sensitive variable files — use CI/CD env vars instead
+*.tfvars.local
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# RSA keys — generated locally, stored in Secrets Manager
+*.pem
+private.pem
+public.pem
+
+# Editor
+.DS_Store
+*.swp

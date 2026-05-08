@@ -76,17 +76,29 @@ export function truncate(str: string, maxLength: number): string {
 // ── Status label / colour mappings ────────────────────────────────────────────
 
 export const jobStatusLabel: Record<string, string> = {
-  DRAFT: "Draft",
-  OPEN: "Open",
+  ACTIVE: "Active",
   CLOSED: "Closed",
   ARCHIVED: "Archived",
 };
 
 export const jobStatusColour: Record<string, string> = {
-  DRAFT: "bg-gray-100 text-gray-700",
-  OPEN: "bg-green-100 text-green-700",
+  ACTIVE: "bg-green-100 text-green-700",
   CLOSED: "bg-red-100 text-red-700",
   ARCHIVED: "bg-yellow-100 text-yellow-700",
+};
+
+export const pipelineStatusLabel: Record<string, string> = {
+  PENDING: "Pending",
+  IN_PROGRESS: "Processing",
+  DONE: "Done",
+  FAILED: "Failed",
+};
+
+export const pipelineStatusColour: Record<string, string> = {
+  PENDING: "bg-gray-100 text-gray-600",
+  IN_PROGRESS: "bg-blue-100 text-blue-700",
+  DONE: "bg-green-100 text-green-700",
+  FAILED: "bg-red-100 text-red-700",
 };
 
 export const candidateStatusLabel: Record<string, string> = {
