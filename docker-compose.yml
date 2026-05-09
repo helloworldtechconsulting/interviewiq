@@ -1,30 +1,33 @@
 # =============================================================================
-# docker-compose.yml — InterviewIQ
+# docker-compose.yml — InterviewIQ DEV stack (default)
 #
-# Profiles
-#   (default / no profile)  — starts postgres only
-#                             Use this during local development when you run
-#                             the Spring Boot app from your IDE or Maven.
+# One-command local development:
+#   docker compose up                # DB + supporting infra
+#   docker compose --profile app up  # DB + infra + backend + frontend (full stack)
+#   docker compose --profile tools up # also pgAdmin (MailHog and MinIO console
+#                                      already start with the default stack — see
+#                                      profiles below for the strict opt-out form)
 #
-#   production              — starts postgres + the containerised app
-#                             docker compose --profile production up
+# Profile cheat sheet
+#   (no profile)  postgres + minio + minio-init + mailhog
+#                 → run the Spring Boot app from your IDE / Maven, hitting
+#                   localhost:5432 (db), localhost:9000 (s3), localhost:1025 (smtp)
+#   app           also build & run the backend container + nginx-served frontend
+#   tools         also start pgAdmin (DB browser) at http://localhost:5050
 #
-# Quickstart (local dev)
-#   docker compose up -d
-#   mvn spring-boot:run -Dspring-boot.run.profiles=local
+# Defaults are NON-SECRET on purpose so a fresh clone runs without a .env:
+#   user: interviewiq / password: interviewiq_secret / db: interviewiq_dev
+#   Override anything by writing it to .env (see .env.example).
 #
-# Quickstart (full stack)
-#   cp .env.example .env   # fill in real values
-#   docker compose --profile production up -d
-#
-# Environment variables
-#   Copy .env.example → .env and fill in every value.
-#   docker compose automatically reads .env from the project root.
+# Sister files
+#   docker-compose.test.yml   minimal Postgres-only stack for CI / integration tests
+#   docker-compose.prod.yml   prod overlay (use as: -f docker-compose.yml -f
+#                              docker-compose.prod.yml)
 # =============================================================================
 
 services:
 
-  # ── PostgreSQL 15 ────────────────────────────────────────────────────────────
+  # ── PostgreSQL 15 ───────────────────────────────────────────────────────────
   postgres:
     image: postgres:15-alpine
     container_name: interviewiq-postgres
@@ -32,10 +35,13 @@ services:
       POSTGRES_DB:       ${DB_NAME:-interviewiq_dev}
       POSTGRES_USER:     ${DB_USERNAME:-interviewiq}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-interviewiq_secret}
+      # Used by docker/postgres-init/01-init.sql to create extra databases
+      POSTGRES_EXTRA_DBS: "interviewiq_test"
     ports:
       - "${DB_PORT_EXPOSED:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-interviewiq} -d ${DB_NAME:-interviewiq_dev}"]
       interval: 5s
@@ -46,66 +52,152 @@ services:
     networks:
       - interviewiq-net
 
-  # ── Spring Boot Application ───────────────────────────────────────────────────
-  # Only started when --profile production is passed.
-  app:
+  # ── MinIO (S3-compatible local stub) ────────────────────────────────────────
+  # Available infra. The app stays in `app.aws.use-local-stub=true` in local,
+  # so it does NOT actually hit MinIO. MinIO is here so:
+  #   1. devs can browse a real S3 API at http://localhost:9001
+  #   2. integration tests / future endpoint-override config can target it
+  minio:
+    image: minio/minio:latest
+    container_name: interviewiq-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER:     ${MINIO_ROOT_USER:-interviewiq}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-interviewiq_secret}
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"      # S3 API
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"  # Web console
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - interviewiq-net
+
+  # ── MinIO bucket bootstrap (one-shot) ───────────────────────────────────────
+  # Creates the S3 bucket on first run so the app's AWS calls don't 404 once
+  # endpoint-override support is added.
+  minio-init:
+    image: minio/mc:latest
+    container_name: interviewiq-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-interviewiq} ${MINIO_ROOT_PASSWORD:-interviewiq_secret} &&
+      mc mb --ignore-existing local/${AWS_S3_BUCKET:-interviewiq-dev-local} &&
+      mc anonymous set download local/${AWS_S3_BUCKET:-interviewiq-dev-local} &&
+      echo 'MinIO bucket ready: ${AWS_S3_BUCKET:-interviewiq-dev-local}'
+      "
+    restart: "no"
+    networks:
+      - interviewiq-net
+
+  # ── MailHog (SMTP capture) ──────────────────────────────────────────────────
+  # SMTP server that swallows every email sent to it and shows it in a web UI.
+  # Available infra — wire your SMTP-based mailer at smtp://mailhog:1025 to use it.
+  # The app currently sends through SES (no SMTP); switch by configuration only.
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: interviewiq-mailhog
+    ports:
+      - "${MAILHOG_SMTP_PORT:-1025}:1025"  # SMTP
+      - "${MAILHOG_UI_PORT:-8025}:8025"    # Web UI
+    restart: unless-stopped
+    networks:
+      - interviewiq-net
+
+  # ── pgAdmin (DB browser, opt-in) ────────────────────────────────────────────
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: interviewiq-pgadmin
     profiles:
-      - production
-    build:
-      context: .
-      dockerfile: Dockerfile
-      # Target the final runner stage (skip re-building the builder in prod)
-      target: runner
-    container_name: interviewiq-app
-    image: interviewiq-backend:latest
+      - tools
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      SPRING_PROFILES_ACTIVE: prod
+      PGADMIN_DEFAULT_EMAIL:    ${PGADMIN_EMAIL:-admin@interviewiq.local}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    restart: unless-stopped
+    networks:
+      - interviewiq-net
 
-      # ── Database ──────────────────────────────────────────────────────────
-      # DB_HOST points to the postgres *service name* inside the compose network.
+  # ── Spring Boot Application (opt-in via --profile app) ──────────────────────
+  app:
+    profiles:
+      - app
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner
+    container_name: interviewiq-app
+    image: interviewiq-backend:dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      # Use the local profile by default — flips on Flyway seed, ephemeral JWT
+      # keys, and AWS local stub mode (so MinIO/MailHog are not strictly required
+      # for the app to start, but ARE reachable for future wiring).
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-local}
+
+      # ── Database ─────────────────────────────────────────────────────────
+      # Point Spring at the in-network postgres host (NOT localhost).
+      SPRING_DATASOURCE_URL:      jdbc:postgresql://postgres:5432/${DB_NAME:-interviewiq_dev}
+      SPRING_DATASOURCE_USERNAME: ${DB_USERNAME:-interviewiq}
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD:-interviewiq_secret}
       DB_HOST:     postgres
       DB_PORT:     5432
-      DB_NAME:     ${DB_NAME}
-      DB_USERNAME: ${DB_USERNAME}
-      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME:     ${DB_NAME:-interviewiq_dev}
+      DB_USERNAME: ${DB_USERNAME:-interviewiq}
+      DB_PASSWORD: ${DB_PASSWORD:-interviewiq_secret}
 
-      # ── Security ──────────────────────────────────────────────────────────
-      # PEM values must be single-line with literal \n for newlines, or use
-      # Docker secrets / a secrets manager in production.
-      APP_SECURITY_JWT_PRIVATE_KEY_PEM: ${APP_SECURITY_JWT_PRIVATE_KEY_PEM}
-      APP_SECURITY_JWT_PUBLIC_KEY_PEM:  ${APP_SECURITY_JWT_PUBLIC_KEY_PEM}
-      APP_SECURITY_INVITE_SECRET:       ${APP_SECURITY_INVITE_SECRET}
+      # ── Security (DEV ONLY — prod MUST override every one of these) ──────
+      # Empty PEMs trigger ephemeral JWT key generation (local profile only).
+      APP_SECURITY_JWT_PRIVATE_KEY_PEM: ${APP_SECURITY_JWT_PRIVATE_KEY_PEM:-}
+      APP_SECURITY_JWT_PUBLIC_KEY_PEM:  ${APP_SECURITY_JWT_PUBLIC_KEY_PEM:-}
+      APP_SECURITY_INVITE_SECRET:       ${APP_SECURITY_INVITE_SECRET:-dev_invite_secret_replace_me_in_prod_32chars_min}
 
-      # ── OpenAI ────────────────────────────────────────────────────────────
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      # ── 3rd-party API stubs (override in .env to test real integrations) ─
+      OPENAI_API_KEY:        ${OPENAI_API_KEY:-sk-local-dev-stub-key-replace-for-ai-testing}
+      RAZORPAY_KEY_ID:       ${RAZORPAY_KEY_ID:-rzp_test_local_stub}
+      RAZORPAY_KEY_SECRET:   ${RAZORPAY_KEY_SECRET:-local_stub_secret}
+      RECALL_API_KEY:        ${RECALL_API_KEY:-recall_local_stub_key}
+      RECALL_WEBHOOK_SECRET: ${RECALL_WEBHOOK_SECRET:-recall_local_webhook_secret}
 
-      # ── Razorpay ──────────────────────────────────────────────────────────
-      RAZORPAY_KEY_ID:     ${RAZORPAY_KEY_ID}
-      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET}
-
-      # ── Recall.ai ─────────────────────────────────────────────────────────
-      RECALL_API_KEY:        ${RECALL_API_KEY}
-      RECALL_WEBHOOK_SECRET: ${RECALL_WEBHOOK_SECRET}
-
-      # ── AWS ───────────────────────────────────────────────────────────────
+      # ── AWS — pointed at MinIO; app currently uses local stub mode anyway ─
       AWS_REGION:            ${AWS_REGION:-ap-south-1}
-      AWS_S3_BUCKET:         ${AWS_S3_BUCKET}
-      AWS_ACCESS_KEY_ID:     ${AWS_ACCESS_KEY_ID}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_S3_BUCKET:         ${AWS_S3_BUCKET:-interviewiq-dev-local}
+      AWS_ACCESS_KEY_ID:     ${AWS_ACCESS_KEY_ID:-${MINIO_ROOT_USER:-interviewiq}}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-${MINIO_ROOT_PASSWORD:-interviewiq_secret}}
+      # Read by AWS SDK v2 if the application ever wires endpointOverride.
+      AWS_ENDPOINT_URL:      http://minio:9000
+      AWS_ENDPOINT_URL_S3:   http://minio:9000
 
-      # ── Application ───────────────────────────────────────────────────────
-      APP_FRONTEND_BASE_URL:          ${APP_FRONTEND_BASE_URL:-https://app.interviewiq.ai}
+      # ── Application ──────────────────────────────────────────────────────
+      APP_FRONTEND_BASE_URL:          ${APP_FRONTEND_BASE_URL:-http://localhost:3000}
       APP_BILLING_SESSION_COST_PAISE: ${APP_BILLING_SESSION_COST_PAISE:-5000}
 
-      # ── JVM ───────────────────────────────────────────────────────────────
+      # ── JVM ──────────────────────────────────────────────────────────────
       JAVA_OPTS: >-
         -XX:+UseContainerSupport
         -XX:MaxRAMPercentage=75.0
         -Djava.security.egd=file:/dev/./urandom
-
     ports:
       - "${APP_PORT:-8080}:8080"
     healthcheck:
@@ -117,23 +209,24 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1g        # Guard against runaway heap; tune with MaxRAMPercentage
+          memory: 1g
     restart: unless-stopped
     networks:
       - interviewiq-net
 
-  # ── React Frontend (Nginx) ────────────────────────────────────────────────────
-  # Only started when --profile production is passed.
+  # ── React Frontend (Nginx, opt-in via --profile app) ────────────────────────
   frontend:
     profiles:
-      - production
+      - app
     build:
       context: frontend
       dockerfile: Dockerfile
       args:
-        VITE_API_BASE_URL: ""   # Empty = Nginx proxies /api to the app container
+        # Empty ⇒ frontend uses relative /api/** and Nginx proxies to the app.
+        # Override (e.g. http://localhost:8080) if you bypass the proxy.
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
     container_name: interviewiq-frontend
-    image: interviewiq-frontend:latest
+    image: interviewiq-frontend:dev
     depends_on:
       app:
         condition: service_healthy
@@ -143,15 +236,16 @@ services:
     networks:
       - interviewiq-net
 
-# ── Volumes ───────────────────────────────────────────────────────────────────
+# ── Volumes ─────────────────────────────────────────────────────────────────
 volumes:
   postgres_data:
     name: interviewiq-postgres-data
+  minio_data:
+    name: interviewiq-minio-data
+  pgadmin_data:
+    name: interviewiq-pgadmin-data
 
-# ── Networks ──────────────────────────────────────────────────────────────────
-# Explicit bridge network so postgres and app can resolve each other by service
-# name (app connects to "postgres:5432") while being isolated from other compose
-# projects on the same host.
+# ── Networks ────────────────────────────────────────────────────────────────
 networks:
   interviewiq-net:
     driver: bridge

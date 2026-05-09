@@ -1,0 +1,56 @@
+# =============================================================================
+# docker-compose.test.yml — InterviewIQ TEST stack
+#
+# Minimal, fast-starting Postgres for CI / integration tests.
+# Designed to run alongside the dev stack without colliding.
+#
+# Quickstart
+#   docker compose -f docker-compose.test.yml up -d
+#   mvn -Dspring.profiles.active=test -Dspring.datasource.url=jdbc:postgresql://localhost:5433/interviewiq_test verify
+#   docker compose -f docker-compose.test.yml down -v
+#
+# Notes
+#   - Different project name (interviewiq-test) ⇒ separate network + volume namespace
+#   - Different container name + host port (5433) ⇒ no clash with dev compose
+#   - tmpfs-backed data dir ⇒ wiped on container restart, max startup speed
+#   - fsync/synchronous_commit off ⇒ unsafe but ~3x faster on Linux test runs
+# =============================================================================
+
+name: interviewiq-test
+
+services:
+
+  postgres-test:
+    image: postgres:15-alpine
+    container_name: interviewiq-postgres-test
+    environment:
+      POSTGRES_DB:       ${TEST_DB_NAME:-interviewiq_test}
+      POSTGRES_USER:     ${TEST_DB_USERNAME:-interviewiq}
+      POSTGRES_PASSWORD: ${TEST_DB_PASSWORD:-interviewiq_secret}
+    command:
+      - "postgres"
+      - "-c"
+      - "fsync=off"
+      - "-c"
+      - "synchronous_commit=off"
+      - "-c"
+      - "full_page_writes=off"
+    ports:
+      - "${TEST_DB_PORT:-5433}:5432"
+    tmpfs:
+      # Postgres data dir lives in RAM — instant startup, blown away on stop.
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${TEST_DB_USERNAME:-interviewiq} -d ${TEST_DB_NAME:-interviewiq_test}"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+      start_period: 3s
+    restart: "no"
+    networks:
+      - interviewiq-test-net
+
+networks:
+  interviewiq-test-net:
+    driver: bridge
+    name: interviewiq-test-network

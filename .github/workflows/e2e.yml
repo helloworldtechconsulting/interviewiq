@@ -1,0 +1,60 @@
+# =============================================================================
+# e2e.yml — end-to-end Selenium smoke tests.
+#
+# These tests live behind the `selenium` Maven profile and the system property
+# `ui.e2e=true`. They are intentionally NOT in the standard CI pipeline because
+# they require the full docker-compose stack (backend + frontend + Postgres)
+# to be running.
+#
+# Trigger manually via the Actions tab, or on a schedule.
+# =============================================================================
+
+name: E2E
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Nightly at 03:00 UTC.
+    - cron: "0 3 * * *"
+
+jobs:
+  e2e:
+    name: Selenium UI smoke tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: temurin
+          cache: maven
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Bring up the full stack (Postgres + backend + frontend).
+      - name: docker compose up -d
+        run: docker compose -f docker-compose.yml up -d --build
+
+      - name: Wait for frontend health
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:3000 >/dev/null; then
+              echo "frontend is up"; exit 0
+            fi
+            sleep 2
+          done
+          echo "frontend never came up"; exit 1
+
+      - name: Run Selenium UI tests
+        run: mvn verify -Pselenium -Dui.e2e=true -B
+        env:
+          INTERVIEWIQ_FRONTEND_BASE_URL: http://localhost:3000
+
+      - name: Tear down stack
+        if: always()
+        run: docker compose -f docker-compose.yml down -v

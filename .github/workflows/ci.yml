@@ -83,7 +83,11 @@ jobs:
           cache: maven
 
       - name: Run tests
-        run: mvn verify -B
+        # `-Pintegration` activates the Failsafe profile so *IT.java run.
+        # Selenium UI tests live behind the separate `selenium` profile and
+        # are exercised by .github/workflows/test-report.yml when the full
+        # docker-compose stack is up.
+        run: mvn verify -Pintegration -B
         env:
           # Supply stub values so Spring context can start for @WebMvcTest slices.
           # Unit tests (TokenServiceTest, WalletServiceTest, etc.) don't need a DB;

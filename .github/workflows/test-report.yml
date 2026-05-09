@@ -1,0 +1,118 @@
+# =============================================================================
+# test-report.yml — runs the full backend test suite, generates HTML reports
+# (Surefire/Failsafe + JaCoCo coverage), uploads them as build artifacts, and
+# publishes them to the gh-pages branch under /test-report and /coverage.
+#
+# The PR comment step posts a coverage summary so reviewers see deltas inline.
+# =============================================================================
+
+name: Test Report
+
+on:
+  push:
+    branches: ["main", "develop"]
+  pull_request:
+    branches: ["main", "develop"]
+
+permissions:
+  contents: write       # needed to publish to gh-pages
+  pull-requests: write  # needed for sticky comments
+  checks: write         # needed for dorny/test-reporter
+
+jobs:
+  test-and-publish:
+    name: Test + Coverage Report
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: interviewiq_test
+          POSTGRES_USER: interviewiq
+          POSTGRES_PASSWORD: interviewiq_ci_secret
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U interviewiq -d interviewiq_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: temurin
+          cache: maven
+
+      # Unit + integration suite. Failsafe is bound to the `verify` phase via
+      # the integration profile, so this single command produces both reports.
+      - name: Run mvn verify
+        run: mvn verify -Pintegration -B
+        env:
+          SPRING_PROFILES_ACTIVE: local
+          SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/interviewiq_test
+          SPRING_DATASOURCE_USERNAME: interviewiq
+          SPRING_DATASOURCE_PASSWORD: interviewiq_ci_secret
+          SPRING_AI_OPENAI_API_KEY: ci-stub-key
+
+      # Build the static HTML test report (uses surefire-report-plugin).
+      - name: Generate Surefire HTML report
+        if: always()
+        run: mvn surefire-report:report-only surefire-report:failsafe-report-only site:site -DgenerateReports=false -B || true
+
+      - name: Inline test results in PR (dorny/test-reporter)
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: Backend Tests
+          path: 'target/surefire-reports/TEST-*.xml,target/failsafe-reports/TEST-*.xml'
+          reporter: java-junit
+          fail-on-error: false
+
+      - name: Upload Surefire/Failsafe reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            target/surefire-reports/
+            target/failsafe-reports/
+            target/site/
+          retention-days: 14
+
+      - name: Upload JaCoCo coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-coverage
+          path: target/site/jacoco/
+          retention-days: 14
+
+      # Post a coverage summary comment on the PR (sticky — updated on every push).
+      - name: Coverage summary comment
+        if: github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: coverage-summary
+          path: target/site/jacoco/jacoco.csv
+
+      # Publish HTML reports to gh-pages so reviewers can browse them.
+      - name: Stage gh-pages content
+        if: github.ref == 'refs/heads/main'
+        run: |
+          mkdir -p public/test-report public/coverage
+          cp -R target/site/jacoco/* public/coverage/ 2>/dev/null || true
+          cp -R target/site/* public/test-report/ 2>/dev/null || true
+
+      - name: Deploy to GitHub Pages
+        if: github.ref == 'refs/heads/main'
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./public
+          keep_files: true
