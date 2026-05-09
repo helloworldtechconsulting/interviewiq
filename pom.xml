@@ -50,6 +50,15 @@
 
         <!-- springdoc-openapi — Swagger UI auto-generation -->
         <springdoc.version>2.6.0</springdoc.version>
+
+        <!-- ── Test stack versions ──────────────────────────────────────────── -->
+        <testcontainers.version>1.20.4</testcontainers.version>
+        <selenium.version>4.27.0</selenium.version>
+        <webdrivermanager.version>5.9.2</webdrivermanager.version>
+        <awaitility.version>4.2.2</awaitility.version>
+        <json-unit.version>3.4.1</json-unit.version>
+        <jacoco.version>0.8.12</jacoco.version>
+        <surefire.version>3.5.2</surefire.version>
     </properties>
 
     <!-- =========================================================
@@ -73,6 +82,16 @@
                 <groupId>software.amazon.awssdk</groupId>
                 <artifactId>bom</artifactId>
                 <version>${aws.sdk.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!-- Testcontainers Bill of Materials — ensures matched versions for
+                 testcontainers, postgresql module and junit-jupiter integration. -->
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>testcontainers-bom</artifactId>
+                <version>${testcontainers.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
@@ -269,6 +288,67 @@
             <scope>test</scope>
         </dependency>
 
+        <!-- ── Testcontainers (versions managed by BOM) ───────────────────── -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- ── Selenium + WebDriverManager (UI smoke tests) ────────────────── -->
+        <dependency>
+            <groupId>org.seleniumhq.selenium</groupId>
+            <artifactId>selenium-java</artifactId>
+            <version>${selenium.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.github.bonigarcia</groupId>
+            <artifactId>webdrivermanager</artifactId>
+            <version>${webdrivermanager.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- ── In-memory DB for unit/slice tests that don't need real Postgres ── -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- ── AssertJ explicit (already on classpath via spring-boot-starter-test) ── -->
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- ── Awaitility — fluent assertions for async behaviour ──────────── -->
+        <dependency>
+            <groupId>org.awaitility</groupId>
+            <artifactId>awaitility</artifactId>
+            <version>${awaitility.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- ── JsonUnit — fluent JSON assertions for MockMvc bodies ────────── -->
+        <dependency>
+            <groupId>net.javacrumbs.json-unit</groupId>
+            <artifactId>json-unit-assertj</artifactId>
+            <version>${json-unit.version}</version>
+            <scope>test</scope>
+        </dependency>
+
     </dependencies>
 
     <!-- =========================================================
@@ -308,8 +388,158 @@
                 </configuration>
             </plugin>
 
+            <!-- ============================================================
+                 Surefire — runs *Test.java (unit + slice tests).
+                 Excludes *IT.java (handled by Failsafe) and Selenium UI
+                 tests (only run via the `selenium` profile).
+                 ============================================================ -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>${surefire.version}</version>
+                <configuration>
+                    <includes>
+                        <include>**/*Test.java</include>
+                    </includes>
+                    <excludes>
+                        <exclude>**/*IT.java</exclude>
+                        <exclude>**/ui/**/*UITest.java</exclude>
+                    </excludes>
+                    <!-- HTML report alongside the standard XML/TXT outputs -->
+                    <reportFormat>plain</reportFormat>
+                    <useFile>true</useFile>
+                    <argLine>@{argLine} -Xshare:off</argLine>
+                </configuration>
+            </plugin>
+
+            <!-- ============================================================
+                 Failsafe — runs *IT.java (Spring Boot integration tests).
+                 reuseForks=false to keep Testcontainers-related state clean
+                 between test classes when needed.
+                 ============================================================ -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <version>${surefire.version}</version>
+                <configuration>
+                    <includes>
+                        <include>**/*IT.java</include>
+                    </includes>
+                    <reuseForks>false</reuseForks>
+                    <argLine>@{argLine} -Xshare:off</argLine>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>integration-tests</id>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- ============================================================
+                 JaCoCo — generates HTML + XML coverage reports.
+                 ============================================================ -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>${jacoco.version}</version>
+                <executions>
+                    <execution>
+                        <id>prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.directory}/site/jacoco</outputDirectory>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- ============================================================
+                 surefire-report-plugin — produces the HTML test report
+                 consumed by `mvn site`.
+                 ============================================================ -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-report-plugin</artifactId>
+                <version>${surefire.version}</version>
+                <configuration>
+                    <aggregate>true</aggregate>
+                </configuration>
+            </plugin>
+
         </plugins>
     </build>
+
+    <!-- =========================================================
+         Profiles
+         - `integration` enables *IT.java (always on by default
+            because Failsafe is bound to verify; the profile is
+            kept so CI can be explicit).
+         - `selenium` activates the UI smoke tests under
+            src/test/java/com/interviewiq/ui/.
+         ========================================================= -->
+    <profiles>
+
+        <profile>
+            <id>integration</id>
+            <activation>
+                <activeByDefault>false</activeByDefault>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-failsafe-plugin</artifactId>
+                        <configuration>
+                            <includes>
+                                <include>**/*IT.java</include>
+                            </includes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <profile>
+            <id>selenium</id>
+            <activation>
+                <activeByDefault>false</activeByDefault>
+            </activation>
+            <properties>
+                <ui.e2e>true</ui.e2e>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-failsafe-plugin</artifactId>
+                        <configuration>
+                            <includes>
+                                <include>**/*IT.java</include>
+                                <include>**/ui/**/*UITest.java</include>
+                            </includes>
+                            <systemPropertyVariables>
+                                <ui.e2e>true</ui.e2e>
+                            </systemPropertyVariables>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+    </profiles>
 
     <!-- =========================================================
          REPOSITORIES — needed for Spring AI milestones/snapshots

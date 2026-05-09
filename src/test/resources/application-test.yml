@@ -1,0 +1,70 @@
+# =============================================================================
+# application-test.yml — config used by Spring Boot integration tests under the
+# `test` profile. Real Postgres is supplied by Testcontainers via dynamic
+# property registration in AbstractIntegrationTest, so the datasource block
+# below is intentionally minimal.
+# =============================================================================
+
+spring:
+  jpa:
+    hibernate:
+      # Flyway still owns DDL; Hibernate validates the model against the schema.
+      ddl-auto: validate
+    properties:
+      hibernate:
+        format_sql: false
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations:
+      - classpath:db/migration
+
+  # Spring AI requires an API key at startup — supply a dummy in test profile.
+  ai:
+    openai:
+      api-key: test-dummy-key
+      chat:
+        options:
+          model: gpt-4o
+          temperature: 0.0
+
+# Application-level test config — keep secrets ephemeral and stub-friendly.
+app:
+  security:
+    jwt:
+      private-key-pem: ""
+      public-key-pem: ""
+      access-token-expiration: 15m
+      refresh-token-expiration: 30d
+    invite:
+      secret: test-invite-secret-do-not-use-in-prod-32bytes
+      expiration: 7d
+    rate-limit:
+      capacity: 10000
+      refill-tokens: 10000
+      refill-duration: PT1M
+  aws:
+    region: ap-south-1
+    s3-bucket: test-bucket
+    ses-from-address: noreply@test.local
+    use-local-stub: true
+  billing:
+    session-cost-paise: 5000
+  frontend:
+    base-url: http://localhost:3000
+  ai:
+    evaluation-max-attempts: 1
+  razorpay:
+    key-id: rzp_test_dummy
+    key-secret: dummy-secret
+  recall:
+    api-key: dummy-recall-key
+    webhook-secret: dummy-recall-webhook
+
+logging:
+  level:
+    com.interviewiq: INFO
+    org.testcontainers: WARN
+    org.flywaydb: WARN
+    org.springframework.web: WARN
+    org.springframework.security: WARN

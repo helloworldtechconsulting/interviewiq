@@ -1,0 +1,133 @@
+# =============================================================================
+# docker-compose.prod.yml — InterviewIQ PRODUCTION overlay
+#
+# Use as an OVERLAY on top of the base file, not standalone:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# What this overlay does
+#   1. Removes dev-only infra (MinIO, MinIO-init, MailHog, pgAdmin) by overriding
+#      their profiles so they never start in production.
+#   2. Forces SPRING_PROFILES_ACTIVE=prod and removes all dev defaults — every
+#      secret MUST come from .env (or your orchestrator's secret store).
+#   3. Switches the app/frontend services to prebuilt images (set the
+#      *_IMAGE env vars in your CI pipeline). No build context here.
+#   4. Adds replica-friendly defaults (no container_name conflicts, restart
+#      policies, sane resource limits).
+#   5. Postgres is included for completeness but MOST production deployments
+#      should run a managed DB (RDS) and remove the postgres service entirely
+#      via `docker compose ... up app frontend` (skip the postgres service).
+#
+# Required environment variables (no defaults — fail-fast on missing secrets):
+#   DB_HOST, DB_NAME, DB_USERNAME, DB_PASSWORD
+#   APP_SECURITY_JWT_PRIVATE_KEY_PEM, APP_SECURITY_JWT_PUBLIC_KEY_PEM
+#   APP_SECURITY_INVITE_SECRET
+#   OPENAI_API_KEY
+#   RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET
+#   RECALL_API_KEY, RECALL_WEBHOOK_SECRET
+#   AWS_REGION, AWS_S3_BUCKET, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+#   APP_FRONTEND_BASE_URL
+#   APP_IMAGE, FRONTEND_IMAGE   (e.g. ghcr.io/your-org/interviewiq-backend:1.4.0)
+# =============================================================================
+
+services:
+
+  # ── Disable dev-only infra in prod ──────────────────────────────────────────
+  # Setting profiles to a list that won't be activated effectively turns these
+  # services off when this overlay is loaded.
+  minio:
+    profiles: ["disabled-in-prod"]
+  minio-init:
+    profiles: ["disabled-in-prod"]
+  mailhog:
+    profiles: ["disabled-in-prod"]
+  pgadmin:
+    profiles: ["disabled-in-prod"]
+
+  # ── Postgres (optional in prod — prefer RDS) ────────────────────────────────
+  postgres:
+    # Drop the bind-mount init scripts in prod; the prod DB is provisioned
+    # separately and should not get dev seed databases.
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+
+  # ── Backend ─────────────────────────────────────────────────────────────────
+  app:
+    profiles: []   # always on in prod (overrides the "app" gate from base)
+    image: ${APP_IMAGE:?APP_IMAGE is required in production}
+    build: !reset null   # never rebuild in prod — pull the image
+    container_name: !reset null    # allow scaling to multiple replicas
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+
+      # Database — REQUIRED, no defaults
+      SPRING_DATASOURCE_URL:      jdbc:postgresql://${DB_HOST:?required}:${DB_PORT:-5432}/${DB_NAME:?required}
+      SPRING_DATASOURCE_USERNAME: ${DB_USERNAME:?required}
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD:?required}
+      DB_HOST:     ${DB_HOST:?required}
+      DB_PORT:     ${DB_PORT:-5432}
+      DB_NAME:     ${DB_NAME:?required}
+      DB_USERNAME: ${DB_USERNAME:?required}
+      DB_PASSWORD: ${DB_PASSWORD:?required}
+
+      # Security — REQUIRED
+      APP_SECURITY_JWT_PRIVATE_KEY_PEM: ${APP_SECURITY_JWT_PRIVATE_KEY_PEM:?required}
+      APP_SECURITY_JWT_PUBLIC_KEY_PEM:  ${APP_SECURITY_JWT_PUBLIC_KEY_PEM:?required}
+      APP_SECURITY_INVITE_SECRET:       ${APP_SECURITY_INVITE_SECRET:?required}
+
+      # 3rd-party — REQUIRED
+      OPENAI_API_KEY:        ${OPENAI_API_KEY:?required}
+      RAZORPAY_KEY_ID:       ${RAZORPAY_KEY_ID:?required}
+      RAZORPAY_KEY_SECRET:   ${RAZORPAY_KEY_SECRET:?required}
+      RECALL_API_KEY:        ${RECALL_API_KEY:?required}
+      RECALL_WEBHOOK_SECRET: ${RECALL_WEBHOOK_SECRET:?required}
+
+      # AWS — real endpoints, no MinIO override
+      AWS_REGION:            ${AWS_REGION:?required}
+      AWS_S3_BUCKET:         ${AWS_S3_BUCKET:?required}
+      AWS_ACCESS_KEY_ID:     ${AWS_ACCESS_KEY_ID:?required}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:?required}
+      AWS_ENDPOINT_URL:      ""
+      AWS_ENDPOINT_URL_S3:   ""
+
+      # Application
+      APP_FRONTEND_BASE_URL:          ${APP_FRONTEND_BASE_URL:?required}
+      APP_BILLING_SESSION_COST_PAISE: ${APP_BILLING_SESSION_COST_PAISE:-5000}
+
+      JAVA_OPTS: >-
+        -XX:+UseContainerSupport
+        -XX:MaxRAMPercentage=75.0
+        -Djava.security.egd=file:/dev/./urandom
+    depends_on: !reset []   # in prod the DB is external; remove dev-only deps
+    restart: always
+    deploy:
+      replicas: ${APP_REPLICAS:-1}
+      resources:
+        limits:
+          memory: 2g
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 5
+
+  # ── Frontend ────────────────────────────────────────────────────────────────
+  frontend:
+    profiles: []   # always on in prod
+    image: ${FRONTEND_IMAGE:?FRONTEND_IMAGE is required in production}
+    build: !reset null
+    container_name: !reset null
+    depends_on: !reset []
+    restart: always
+    deploy:
+      replicas: ${FRONTEND_REPLICAS:-1}
+      resources:
+        limits:
+          memory: 256m
+
+volumes:
+  postgres_data:
+    name: interviewiq-postgres-data-prod

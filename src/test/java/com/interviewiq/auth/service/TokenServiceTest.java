@@ -75,8 +75,13 @@ class TokenServiceTest {
         User user  = buildUser(userId, companyId, "bob@example.com", UserRole.RECRUITER);
         String jwt = tokenService.generateAccessToken(user);
 
-        // Flip the last character to corrupt the signature
-        String tampered = jwt.substring(0, jwt.length() - 1) + (jwt.endsWith("a") ? "b" : "a");
+        // Flip several signature bytes to guarantee a meaningful corruption
+        // (single-char base64 flips can be no-ops if the char is padding).
+        int dot = jwt.lastIndexOf('.');
+        String header     = jwt.substring(0, dot + 1);
+        String signature  = jwt.substring(dot + 1);
+        // Reverse the signature — virtually certain to be invalid
+        String tampered = header + new StringBuilder(signature).reverse();
 
         assertThatThrownBy(() -> tokenService.validateAccessToken(tampered))
                 .isInstanceOf(InvalidTokenException.class);
