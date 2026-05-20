@@ -239,14 +239,19 @@ export function CandidateDetailPage() {
     },
   });
 
-  const inviteMutation = useMutation({
-    mutationFn: () => candidatesApi.sendInvite(candidateId!),
+  const inviteMutation = useMutation<any, Error, string>({
+    mutationFn: (sessionId: string) =>
+        candidatesApi.sendInvite(sessionId),
+
     onSuccess() {
       toast.success("Invite email sent to candidate.");
     },
-    onError(error) {
+
+    onError(error: any) {
       toast.error(
-        error instanceof AppError ? error.message : "Could not send invite.",
+          error instanceof AppError
+              ? error.message
+              : "Could not send invite.",
       );
     },
   });
@@ -562,7 +567,15 @@ export function CandidateDetailPage() {
               <Button
                 variant="outline"
                 className="w-full"
-                onClick={() => inviteMutation.mutate()}
+                onClick={(e) => {
+                  e.stopPropagation();
+
+                  if (sessions.length > 0) {
+                    inviteMutation.mutate(sessions[0].id);
+                  } else {
+                    toast.error("No session found.");
+                  }
+                }}
                 disabled={inviteMutation.isPending}
               >
                 {inviteMutation.isPending ? (

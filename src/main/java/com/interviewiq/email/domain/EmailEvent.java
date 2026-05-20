@@ -97,6 +97,7 @@ public class EmailEvent {
     public void setSentAt(OffsetDateTime sentAt) { this.sentAt = sentAt; }
 
     public OffsetDateTime getCreatedAt() { return createdAt; }
+    public void setCreatedAt(OffsetDateTime createdAt) { this.createdAt = createdAt; } // ← ADD KARO
 
     @Override
     public String toString() {

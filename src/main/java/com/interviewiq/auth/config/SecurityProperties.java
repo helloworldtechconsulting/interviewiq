@@ -95,7 +95,7 @@ public class SecurityProperties {
         /**
          * How long invite tokens remain valid after issuance. Defaults to 7 days.
          */
-        private Duration expiration = Duration.ofDays(7);
+        private Duration expiration = Duration.ofHours(72);
 
         public String getSecret() { return secret; }
         public void setSecret(String secret) { this.secret = secret; }

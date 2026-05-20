@@ -78,6 +78,11 @@ public class SessionController {
         return ApiResponse.ok(sessionService.cancel(id));
     }
 
+    @PostMapping("/{id}/resend")
+    public ApiResponse<SessionResponse> resendInvite(@PathVariable UUID id) {
+        return ApiResponse.ok(sessionService.resendInvite(id));
+    }
+
     @GetMapping("/{id}/evaluation")
     public ApiResponse<EvaluationReportResponse> getEvaluation(@PathVariable UUID id) {
         return ApiResponse.ok(sessionService.getEvaluation(id));

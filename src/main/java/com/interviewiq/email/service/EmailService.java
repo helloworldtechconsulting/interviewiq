@@ -153,9 +153,11 @@ public class EmailService {
 
         if (props.isUseLocalStub()) {
             log.info("[SES STUB] to={} subject={} body_chars={}", recipientLower, subject, htmlBody.length());
+            OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+            event.setCreatedAt(now);
             event.setStatus(EmailStatus.SENT);
             event.setProviderMessageId("stub-" + UUID.randomUUID());
-            event.setSentAt(OffsetDateTime.now(ZoneOffset.UTC));
+            event.setSentAt(now);
             emailEventRepository.save(event);
             return;
         }
@@ -173,9 +175,11 @@ public class EmailService {
                     .build();
 
             SendEmailResponse response = sesClient.sendEmail(request);
+            OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);  // ← ADD
+            event.setCreatedAt(now);
             event.setStatus(EmailStatus.SENT);
             event.setProviderMessageId(response.messageId());
-            event.setSentAt(OffsetDateTime.now(ZoneOffset.UTC));
+            event.setSentAt(now);
             log.debug("Email sent: to={} type={} messageId={}", recipientLower, emailType, response.messageId());
 
         } catch (SesException e) {
@@ -202,6 +206,7 @@ public class EmailService {
         event.setCompanyId(companyId);
         event.setUserId(userId);
         event.setStatus(EmailStatus.QUEUED);
+        event.setCreatedAt(OffsetDateTime.now(ZoneOffset.UTC));
         return event;
     }
 }

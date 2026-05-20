@@ -251,6 +251,67 @@ public class SessionService {
         return SessionResponse.from(session);
     }
 
+    // =========================================================================
+    // resend invite
+    // =========================================================================
+
+    @Auditable(action = "SESSION_INVITE_RESENT", entityType = "SESSION", entityIdArg = 0)
+    @Transactional
+    public SessionResponse resendInvite(UUID sessionId) {
+
+        // Company-scoped lookup (prevents cross-tenant access)
+        InterviewSession session = requireSession(sessionId);
+
+        // Allow resend only for INVITED sessions
+        if (session.getStatus() != SessionStatus.INVITED) {
+            throw new SessionStateException(
+                    "Invite can only be resent for INVITED sessions. Current state: "
+                            + session.getStatus());
+        }
+
+        Candidate candidate = candidateRepository.findById(session.getCandidateId())
+                .orElseThrow(() ->
+                        new ResourceNotFoundException("Candidate", session.getCandidateId()));
+
+        // Reset invite expiry window (fresh 72 hours validity)
+        session.setInviteExpiresAt(
+                OffsetDateTime.now(ZoneOffset.UTC)
+                        .plus(securityProperties.getInvite().getExpiration()));
+
+        // Generate fresh invite token
+        String inviteToken = tokenService.generateInviteToken(
+                session.getId(),
+                candidate.getId(),
+                session.getCompanyId()
+        );
+
+        // Rotate token hash (invalidates previously issued links)
+        session.setInviteTokenHash(tokenService.hashToken(inviteToken));
+
+        sessionRepository.save(session);
+
+        // Build invite URL
+        String companyName = companyRepository.findById(session.getCompanyId())
+                .map(c -> c.getName())
+                .orElse("InterviewIQ");
+
+        String inviteUrl = frontendBaseUrl + "/interview?token=" + inviteToken;
+
+        // Resend invite email
+        emailService.sendCandidateInviteEmail(
+                candidate.getEmail(),
+                candidate.getFullName(),
+                companyName,
+                inviteUrl,
+                session.getCompanyId()
+        );
+
+        log.info("Interview invite resent securely: sessionId={}", sessionId);
+
+        return SessionResponse.from(session);
+    }
+
+
     @Transactional(readOnly = true)
     public EvaluationReportResponse getEvaluation(UUID sessionId) {
         UUID companyId = SecurityContext.requireCompanyId();
