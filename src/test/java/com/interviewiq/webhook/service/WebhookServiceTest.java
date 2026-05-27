@@ -2,9 +2,7 @@ package com.interviewiq.webhook.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.interviewiq.billing.service.WalletService;
-import com.interviewiq.session.service.SessionService;
 import com.interviewiq.shared.config.RazorpayProperties;
-import com.interviewiq.shared.config.RecallProperties;
 import com.interviewiq.shared.exception.ValidationException;
 import com.interviewiq.webhook.domain.WebhookEvent;
 import com.interviewiq.webhook.domain.WebhookProvider;
@@ -39,9 +37,7 @@ class WebhookServiceTest {
 
     @Mock WebhookEventRepository webhookEventRepository;
     @Mock WalletService          walletService;
-    @Mock SessionService         sessionService;
     @Mock RazorpayProperties     razorpayProps;
-    @Mock RecallProperties       recallProps;
 
     private WebhookService webhookService;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -51,8 +47,8 @@ class WebhookServiceTest {
     @BeforeEach
     void setUp() {
         webhookService = new WebhookService(
-                webhookEventRepository, walletService, sessionService,
-                razorpayProps, recallProps, objectMapper);
+                webhookEventRepository, walletService,
+                razorpayProps, objectMapper);
     }
 
     // =========================================================================

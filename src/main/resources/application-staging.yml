@@ -32,6 +32,7 @@ spring:
   flyway:
     locations:
       - classpath:db/migration
+    clean-disabled: true   # SAFETY: never allow flyway:clean against staging data
 
   # ── Spring AI ─────────────────────────────────────────────────────────────
   ai:

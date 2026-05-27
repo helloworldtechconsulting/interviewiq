@@ -14,6 +14,7 @@ public record UserResponse(
         UserRole       role,
         boolean        active,
         boolean        emailVerified,
+        OffsetDateTime lastLoginAt,
         OffsetDateTime createdAt
 ) {
     public static UserResponse from(User user) {
@@ -25,6 +26,7 @@ public record UserResponse(
                 user.getRole(),
                 user.isActive(),
                 user.isEmailVerified(),
+                user.getLastLoginAt(),
                 user.getCreatedAt()
         );
     }

@@ -1,6 +1,8 @@
 package com.interviewiq.webhook.domain;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.UUID;
@@ -36,6 +38,7 @@ public class WebhookEvent {
     private String eventType;
 
     /** Full raw event payload. */
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(nullable = false, columnDefinition = "jsonb")
     private String payloadJson;
 

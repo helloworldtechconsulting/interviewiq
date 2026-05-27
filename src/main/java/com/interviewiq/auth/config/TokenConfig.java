@@ -130,6 +130,9 @@ public class TokenConfig {
      */
     private byte[] decodePem(String pem, String label) {
         String cleaned = pem
+                // Normalise literal \n escape sequences injected by env-var tooling
+                // (e.g. APP_SECURITY_JWT_PRIVATE_KEY_PEM on Windows with \\n separators)
+                .replace("\\n", "\n")
                 .replace("-----BEGIN " + label + "-----", "")
                 .replace("-----END " + label + "-----", "")
                 .replaceAll("\\s+", "");

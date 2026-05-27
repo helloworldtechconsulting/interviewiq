@@ -183,6 +183,22 @@ public class CompanyService {
             company.setDomain(newDomain);
         }
 
+        if (req.website() != null) {
+            company.setWebsite(req.website().isBlank() ? null : req.website().strip());
+        }
+
+        if (req.industry() != null) {
+            company.setIndustry(req.industry().isBlank() ? null : req.industry().strip());
+        }
+
+        if (req.size() != null) {
+            company.setSize(req.size());
+        }
+
+        if (req.gstNumber() != null) {
+            company.setGstNumber(req.gstNumber().isBlank() ? null : req.gstNumber().strip());
+        }
+
         companyRepository.save(company);
         log.info("Company profile updated: companyId={}", companyId);
         return CompanyProfileResponse.from(company);

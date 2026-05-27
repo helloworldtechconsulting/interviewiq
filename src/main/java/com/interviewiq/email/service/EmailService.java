@@ -16,6 +16,7 @@ import software.amazon.awssdk.services.ses.model.Destination;
 import software.amazon.awssdk.services.ses.model.Message;
 import software.amazon.awssdk.services.ses.model.SendEmailRequest;
 import software.amazon.awssdk.services.ses.model.SendEmailResponse;
+import software.amazon.awssdk.core.exception.SdkException;
 import software.amazon.awssdk.services.ses.model.SesException;
 
 import java.time.OffsetDateTime;
@@ -152,9 +153,11 @@ public class EmailService {
 
         if (props.isUseLocalStub()) {
             log.info("[SES STUB] to={} subject={} body_chars={}", recipientLower, subject, htmlBody.length());
+            OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+            event.setCreatedAt(now);
             event.setStatus(EmailStatus.SENT);
             event.setProviderMessageId("stub-" + UUID.randomUUID());
-            event.setSentAt(OffsetDateTime.now(ZoneOffset.UTC));
+            event.setSentAt(now);
             emailEventRepository.save(event);
             return;
         }
@@ -172,13 +175,23 @@ public class EmailService {
                     .build();
 
             SendEmailResponse response = sesClient.sendEmail(request);
+            OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);  // ← ADD
+            event.setCreatedAt(now);
             event.setStatus(EmailStatus.SENT);
             event.setProviderMessageId(response.messageId());
-            event.setSentAt(OffsetDateTime.now(ZoneOffset.UTC));
+            event.setSentAt(now);
             log.debug("Email sent: to={} type={} messageId={}", recipientLower, emailType, response.messageId());
 
         } catch (SesException e) {
-            log.warn("SES send failed: to={} type={} error={}", recipientLower, emailType, e.getMessage());
+            // SES service error — invalid recipient, quota exceeded, etc.
+            log.warn("SES service error: to={} type={} error={}", recipientLower, emailType, e.getMessage());
+            event.setStatus(EmailStatus.FAILED);
+        } catch (SdkException e) {
+            // SDK client error — missing credentials, no network, endpoint unreachable.
+            // Common in local dev when AWS is not configured and use-local-stub is false.
+            // Log as WARN (not ERROR) — the request itself succeeded; only email delivery failed.
+            log.warn("SES client error (check AWS credentials or set use-local-stub=true): " +
+                     "to={} type={} error={}", recipientLower, emailType, e.getMessage());
             event.setStatus(EmailStatus.FAILED);
         }
 
@@ -193,6 +206,7 @@ public class EmailService {
         event.setCompanyId(companyId);
         event.setUserId(userId);
         event.setStatus(EmailStatus.QUEUED);
+        event.setCreatedAt(OffsetDateTime.now(ZoneOffset.UTC));
         return event;
     }
 }

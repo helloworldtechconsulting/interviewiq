@@ -25,7 +25,7 @@ export const queryKeys = {
   // ── Candidates ─────────────────────────────────────────────────────────────
   candidates: {
     all: () => ["candidates"] as const,
-    list: (params?: { jobId?: string; page?: number; status?: string }) =>
+    list: (params?: { jobOpeningId?: string; page?: number; status?: string }) =>
       ["candidates", "list", params] as const,
     detail: (candidateId: string) =>
       ["candidates", "detail", candidateId] as const,
