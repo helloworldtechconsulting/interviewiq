@@ -328,6 +328,7 @@ export interface Session {
   errorCode: string | null;
   createdAt: string;
   updatedAt: string;
+  meetUrl: string | null;
 }
 
 /**
