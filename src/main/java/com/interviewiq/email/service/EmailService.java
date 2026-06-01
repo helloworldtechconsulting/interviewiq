@@ -142,6 +142,37 @@ public class EmailService {
         send(to, subject, body, "CANDIDATE_INVITE", companyId, null);
     }
 
+
+    private static final String LOW_BALANCE_TEMPLATE = """
+        <html><body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2>⚠️ Low Wallet Balance Alert</h2>
+        <p>Hi %s,</p>
+        <p>Your InterviewIQ wallet balance has dropped to <strong>₹%d</strong>.</p>
+        <p>Please top up your wallet to continue scheduling AI interviews.</p>
+        <p style="margin: 30px 0;">
+          <a href="%s/app/billing" style="background: #4F46E5; color: white; padding: 14px 28px;
+             text-decoration: none; border-radius: 6px; font-size: 16px;">
+            Top Up Wallet
+          </a>
+        </p>
+        <p style="color: #888; font-size: 12px;">This is an automated alert from InterviewIQ.</p>
+        </body></html>
+        """;
+
+    @Transactional
+    public void sendLowBalanceAlert(String to, String adminName,
+                                    long balancePaise, UUID companyId,
+                                    String frontendBaseUrl) {
+        String subject = "⚠️ Low wallet balance alert — InterviewIQ";
+        long balanceRupees = balancePaise / 100;
+        String body = LOW_BALANCE_TEMPLATE.formatted(
+                adminName,
+                balanceRupees,
+                frontendBaseUrl
+        );
+        send(to, subject, body, "LOW_BALANCE_ALERT", companyId, null);
+    }
+
     // =========================================================================
     // Private helpers
     // =========================================================================

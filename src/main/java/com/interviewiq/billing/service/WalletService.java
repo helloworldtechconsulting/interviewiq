@@ -1,5 +1,8 @@
 package com.interviewiq.billing.service;
 
+import jakarta.validation.ValidationException;
+import org.springframework.beans.factory.annotation.Value;
+import com.interviewiq.auth.infrastructure.UserRepository;
 import com.interviewiq.billing.domain.TransactionStatus;
 import com.interviewiq.billing.domain.TransactionType;
 import com.interviewiq.billing.domain.Wallet;
@@ -8,6 +11,7 @@ import com.interviewiq.billing.dto.TopUpResponse;
 import com.interviewiq.billing.dto.WalletResponse;
 import com.interviewiq.billing.infrastructure.WalletRepository;
 import com.interviewiq.billing.infrastructure.WalletTransactionRepository;
+import com.interviewiq.email.service.EmailService;
 import com.interviewiq.shared.config.RazorpayProperties;
 import com.interviewiq.shared.exception.ExternalServiceException;
 import com.interviewiq.shared.exception.InsufficientBalanceException;
@@ -23,9 +27,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
 import java.util.UUID;
-
 /**
  * Wallet lifecycle service — balance queries, top-up initiation, and the internal
  * reserve / settle / release operations used by SessionService.
@@ -58,15 +60,27 @@ public class WalletService {
     private final WalletTransactionRepository txRepository;
     private final RazorpayClient              razorpayClient;
     private final RazorpayProperties          razorpayProps;
+    private final EmailService emailService;
+    private final UserRepository userRepository;
+
+    @Value("${app.frontend.base-url:http://localhost:5173}")
+    private String frontendBaseUrl;
+
+    private static final long LOW_BALANCE_THRESHOLD_PAISE = 30_000L; // ₹300
 
     public WalletService(WalletRepository walletRepository,
                          WalletTransactionRepository txRepository,
                          RazorpayClient razorpayClient,
-                         RazorpayProperties razorpayProps) {
+                         RazorpayProperties razorpayProps,
+                         UserRepository userRepository,
+                         EmailService emailService) {
         this.walletRepository = walletRepository;
-        this.txRepository     = txRepository;
-        this.razorpayClient   = razorpayClient;
-        this.razorpayProps    = razorpayProps;
+        this.txRepository = txRepository;
+        this.razorpayClient = razorpayClient;
+        this.razorpayProps = razorpayProps;
+        this.userRepository = userRepository;
+        this.emailService = emailService;
+
     }
 
     // =========================================================================
@@ -227,6 +241,11 @@ public class WalletService {
                 settledPaise, wallet.getBalancePaise()));
 
         log.info("Funds settled: companyId={} sessionId={} settledPaise={}", companyId, sessionId, settledPaise);
+
+        // Low balance check
+        if (wallet.getBalancePaise() <= WalletService.LOW_BALANCE_THRESHOLD_PAISE) {
+            triggerLowBalanceAlert(companyId, wallet.getBalancePaise());
+        }
     }
 
     /**
@@ -285,4 +304,27 @@ public class WalletService {
         tx.setStatus(TransactionStatus.CONFIRMED);
         return tx;
     }
+private void triggerLowBalanceAlert(UUID companyId, long balancePaise) {
+    try {
+        userRepository.findAllByCompanyIdOrderByFullNameAsc(companyId)
+                .stream()
+                .filter(u -> u.getRole() == com.interviewiq.auth.domain.UserRole.ADMIN)
+                .filter(u -> u.isActive() && u.isEmailVerified())
+                .findFirst()
+                .ifPresent(admin -> {
+                    emailService.sendLowBalanceAlert(
+                            admin.getEmail(),
+                            admin.getFullName(),
+                            balancePaise,
+                            companyId,
+                            frontendBaseUrl
+                    );
+                    log.info("Low balance alert sent: companyId={} balancePaise={}",
+                            companyId, balancePaise);
+                });
+    } catch (Exception e) {
+        log.warn("Failed to send low balance alert: companyId={} error={}",
+                companyId, e.getMessage());
+    }
+}
 }
