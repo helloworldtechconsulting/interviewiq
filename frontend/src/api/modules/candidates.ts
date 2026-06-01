@@ -41,8 +41,8 @@ export const candidatesApi = {
       })
       .then((r) => r.data),
 
-  sendInvite: (candidateId: string) =>
-    apiClient
-      .post(`${BASE}/${candidateId}/invite`)
-      .then((r) => r.data),
+  sendInvite: (sessionId: string) =>
+      apiClient
+          .post(`/api/v1/sessions/${sessionId}/resend`)
+          .then((r) => r.data),
 };

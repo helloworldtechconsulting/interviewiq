@@ -75,8 +75,16 @@ class TokenServiceTest {
         User user  = buildUser(userId, companyId, "bob@example.com", UserRole.RECRUITER);
         String jwt = tokenService.generateAccessToken(user);
 
-        // Flip the last character to corrupt the signature
-        String tampered = jwt.substring(0, jwt.length() - 1) + (jwt.endsWith("a") ? "b" : "a");
+        // Corrupt the first character of the signature section.
+        // We target the START of the signature rather than the end because the last
+        // base64url character of an RS256 signature (256 bytes) encodes only 2 real
+        // data bits — adjacent characters like 'a'/'b' share those bits and decode
+        // to identical bytes, so flipping the last char leaves the signature intact.
+        int lastDot = jwt.lastIndexOf('.');
+        String sigPart = jwt.substring(lastDot + 1);
+        char firstSigChar = sigPart.charAt(0);
+        char replacement  = (firstSigChar == 'A') ? 'B' : 'A';
+        String tampered   = jwt.substring(0, lastDot + 1) + replacement + sigPart.substring(1);
 
         assertThatThrownBy(() -> tokenService.validateAccessToken(tampered))
                 .isInstanceOf(InvalidTokenException.class);

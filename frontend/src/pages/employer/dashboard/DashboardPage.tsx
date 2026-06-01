@@ -1,7 +1,7 @@
 // =============================================================================
 // DashboardPage.tsx — Overview stats + recent sessions
 // =============================================================================
-
+import { dashboardApi } from "@/api/modules/dashboard";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import {
@@ -22,9 +22,9 @@ import { queryKeys } from "@/lib/queryKeys";
 import { PageHeader } from "@/components/common/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { StatusBadge } from "@/components/common/StatusBadge";
+
 import { Separator } from "@/components/ui/separator";
-import { formatDateTime, formatRupees } from "@/lib/utils";
+import { formatRupees } from "@/lib/utils";
 import { useAuthUser } from "@/stores/authStore";
 
 // ── Stat card ─────────────────────────────────────────────────────────────────
@@ -90,8 +90,13 @@ export function DashboardPage() {
     queryKey: queryKeys.billing.wallet(),
     queryFn: billingApi.getWallet,
   });
+  const { data: activityFeed, isLoading: activityLoading } = useQuery({
+    queryKey: ["dashboard", "activity"],
+    queryFn: dashboardApi.getRecentActivity,
+  });
 
-  const recentSessions = sessions?.content ?? [];
+  const recentSessions = Array.isArray(activityFeed) ? activityFeed : [];
+  console.log("recentSessions:", recentSessions);
 
   return (
     <div className="space-y-6">
@@ -156,7 +161,7 @@ export function DashboardPage() {
         <Separator />
 
         <CardContent className="p-0">
-          {sessionsLoading ? (
+          {activityLoading? (
             <div className="space-y-3 p-4">
               {[1, 2, 3].map((i) => (
                 <div key={i} className="h-14 animate-pulse rounded bg-muted" />
@@ -180,22 +185,33 @@ export function DashboardPage() {
           ) : (
             <ul className="divide-y">
               {recentSessions.map((s) => (
-                <li
-                  key={s.id}
-                  className="flex cursor-pointer items-center gap-4 px-6 py-4 transition-colors hover:bg-muted/50"
-                  onClick={() => navigate(`/app/sessions/${s.id}`)}
-                >
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
-                    {s.candidateName.charAt(0).toUpperCase()}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium">{s.candidateName}</p>
-                    <p className="truncate text-xs text-muted-foreground">
-                      {s.jobTitle} · {formatDateTime(s.scheduledAt)}
-                    </p>
-                  </div>
-                  <StatusBadge kind="session" status={s.status} />
-                </li>
+                  <li
+                      key={s.sessionId}
+                      className="flex cursor-pointer items-center gap-4 px-6 py-4 transition-colors hover:bg-muted/50"
+                      onClick={() => navigate(`/app/sessions/${s.sessionId}`)}
+                  >
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
+                      {s.candidateName.slice(0, 2).toUpperCase()}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">
+                        {s.candidateName}
+                      </p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {s.jobTitle}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {s.overallScore !== null && (
+                          <span className="text-sm font-bold text-primary">
+          {s.overallScore}/100
+        </span>
+                      )}
+                      <p className="text-xs text-muted-foreground">
+                        {new Date(s.completedAt).toLocaleString()}
+                      </p>
+                    </div>
+                  </li>
               ))}
             </ul>
           )}

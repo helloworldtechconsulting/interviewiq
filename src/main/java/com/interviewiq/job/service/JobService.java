@@ -71,6 +71,9 @@ public class JobService {
         job.setDepartment(req.department() != null ? req.department().strip() : null);
         job.setLocationType(req.locationType());
         job.setEmploymentType(req.employmentType());
+        job.setDescription(req.description());
+        job.setExperienceMin(req.experienceMin());
+        job.setExperienceMax(req.experienceMax());
         job.setStatus(JobStatus.ACTIVE);
         job.setJdExtractionStatus(PipelineStatus.PENDING);
         jobOpeningRepository.save(job);
@@ -102,6 +105,9 @@ public class JobService {
         if (req.locationType() != null)   job.setLocationType(req.locationType());
         if (req.employmentType() != null) job.setEmploymentType(req.employmentType());
         if (req.status() != null)         job.setStatus(req.status());
+        if (req.description() != null)    job.setDescription(req.description());
+        if (req.experienceMin() != null)  job.setExperienceMin(req.experienceMin());
+        if (req.experienceMax() != null)  job.setExperienceMax(req.experienceMax());
 
         jobOpeningRepository.save(job);
         return JobResponse.from(job);
