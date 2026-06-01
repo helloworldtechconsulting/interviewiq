@@ -17,7 +17,12 @@ export const billingApi = {
     apiClient
       .get<Page<WalletTransaction>>(`${BASE}/transactions`, { params })
       .then((r) => r.data),
-
+  async getInvoiceUrl(transactionId: string): Promise<string> {
+    const response = await apiClient.get<string>(
+        `${BASE}/transactions/${transactionId}/invoice`
+    );
+    return response.data;
+  },
   // POST /api/v1/billing/topup — creates a Razorpay order
   createOrder: (data: CreateOrderRequest) =>
     apiClient

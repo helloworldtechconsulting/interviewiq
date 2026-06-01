@@ -23,6 +23,7 @@ import {
   ChevronRight,
   Loader2,
   Plus,
+  Download,
 } from "lucide-react";
 
 import { billingApi } from "@/api/modules/billing";
@@ -406,6 +407,22 @@ export function BillingPage() {
                     </p>
                   </div>
                   <div className="text-right">
+                    {tx.transactionType === "TOPUP" && (
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={async () => {
+                              try {
+                                const invoiceUrl = await billingApi.getInvoiceUrl(tx.id);
+                                window.open(invoiceUrl, "_blank");
+                              } catch {
+                                toast.error("Unable to fetch invoice");
+                              }
+                            }}
+                        >
+                          <Download className="h-4 w-4" />
+                        </Button>
+                    )}
                     <p
                       className={
                         isCredit(tx.transactionType)

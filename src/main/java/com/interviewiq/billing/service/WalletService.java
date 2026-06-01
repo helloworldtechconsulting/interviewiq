@@ -286,7 +286,41 @@ public class WalletService {
         return walletRepository.findByCompanyId(companyId)
                 .orElseThrow(() -> new ResourceNotFoundException("Wallet not found for company: " + companyId));
     }
-
+    /**
+     * Fetches the Razorpay invoice URL for a TOPUP transaction.
+     */
+    @Transactional(readOnly = true)
+    public String getInvoiceUrl(UUID transactionId) {
+        UUID companyId = SecurityContext.requireCompanyId();
+        Wallet wallet = requireWalletByCompanyId(companyId);
+        WalletTransaction tx = txRepository.findById(transactionId)
+                .orElseThrow(() -> new ResourceNotFoundException("Transaction", transactionId));
+        // Security check — transaction must belong to this company
+        if (!tx.getCompanyId().equals(companyId)) {
+            throw new ResourceNotFoundException("Transaction", transactionId);
+        }
+        // Only TOPUP transactions have Razorpay invoices
+        if (tx.getTransactionType() != TransactionType.TOPUP) {
+            throw new ValidationException("Invoice is only available for top-up transactions.");
+        }
+        if (tx.getRazorpayPaymentId() == null || tx.getRazorpayPaymentId().isBlank()) {
+            throw new ValidationException("No payment ID found for this transaction.");
+        }
+        try {
+            // Fetch invoice from Razorpay
+            com.razorpay.Payment payment = razorpayClient.payments.fetch(tx.getRazorpayPaymentId());
+            String invoiceUrl = payment.get("invoice_url");
+            if (invoiceUrl == null || invoiceUrl.isBlank()) {
+                // Fallback: Razorpay receipt URL
+                invoiceUrl = "https://dashboard.razorpay.com/app/payment/" + tx.getRazorpayPaymentId();
+            }
+            return invoiceUrl;
+        } catch (RazorpayException e) {
+            log.error("Razorpay invoice fetch failed: transactionId={} error={}",
+                    transactionId, e.getMessage());
+            throw new ExternalServiceException("Could not fetch invoice. Please try again later.");
+        }
+    }
     // =========================================================================
     // Private helpers
     // =========================================================================
