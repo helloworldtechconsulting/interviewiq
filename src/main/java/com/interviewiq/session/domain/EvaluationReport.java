@@ -3,6 +3,8 @@ package com.interviewiq.session.domain;
 import com.interviewiq.ai.domain.HiringRecommendation;
 import com.interviewiq.shared.domain.PipelineStatus;
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.UUID;
@@ -73,6 +75,7 @@ public class EvaluationReport {
      * Structured per-question AI evaluation as a JSON document.
      * Narrative output — not aggregated, not queryable by field.
      */
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(columnDefinition = "jsonb")
     private String evaluationJson;
 

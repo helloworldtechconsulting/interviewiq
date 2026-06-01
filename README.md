@@ -42,11 +42,18 @@
 ### Frontend
 | Layer | Technology |
 |---|---|
-| Framework | React + TypeScript |
-| Build Tool | Vite |
-| Routing | React Router |
-| State | Zustand |
-| Styling | Tailwind CSS |
+| Framework | React 18 + TypeScript 5 |
+| Build Tool | Vite 5 |
+| Routing | React Router DOM 7 |
+| Server State | TanStack React Query v5 |
+| Client State | Zustand |
+| HTTP Client | Axios |
+| Forms | React Hook Form + Zod |
+| Styling | Tailwind CSS + Radix UI primitives |
+| Toasts | Sonner |
+| Icons | Lucide React |
+| Charts | Recharts |
+| Testing | Vitest + Testing Library + MSW |
 
 ### Infrastructure
 - **Docker** + **Docker Compose** (PostgreSQL, Spring Boot app, React/Nginx)
@@ -83,37 +90,17 @@ docker compose up -d
 
 **3. Configure environment**
 
-Create `src/main/resources/application-local.yml` and set the required properties:
+The repository ships with `src/main/resources/application-local.yml` pre-configured for local Docker Compose. All required properties already have safe local defaults:
 
-```yaml
-spring:
-  datasource:
-    url: jdbc:postgresql://localhost:5432/interviewiq_dev
-    username: interviewiq
-    password: interviewiq_secret
-  ai:
-    openai:
-      api-key: your-openai-api-key
+- Database connects to `localhost:5432/interviewiq_dev` (Docker credentials)
+- OpenAI API key is set to a stub value — replace with a real key only if you need to test AI features
+- JWT keys are empty strings, which auto-generates an ephemeral RSA key pair at startup
+- AWS is stubbed (`use-local-stub: true`) — no real S3 or SES calls are made
+- Flyway includes `db/seed` for local dev data and `clean-on-validation-error: true` for automatic schema repair
 
-app:
-  security:
-    jwt:
-      private-key-pem: |
-        -----BEGIN PRIVATE KEY-----
-        ...
-        -----END PRIVATE KEY-----
-      public-key-pem: |
-        -----BEGIN PUBLIC KEY-----
-        ...
-        -----END PUBLIC KEY-----
+To test real AI features locally, set `OPENAI_API_KEY` as an environment variable or update the `api-key` entry in `application-local.yml`.
 
-aws:
-  region: ap-south-1
-  s3:
-    bucket: your-s3-bucket
-  access-key-id: your-access-key
-  secret-access-key: your-secret-key
-```
+For Razorpay, Recall.ai, and AWS integrations, override the stub values in `application-local.yml` or via environment variables.
 
 **4. Run the backend**
 
@@ -197,6 +184,8 @@ interviewiq/
 
 | Variable | Description |
 |---|---|
+| `DB_HOST` | PostgreSQL host (default: `localhost`) |
+| `DB_PORT` | PostgreSQL port (default: `5432`) |
 | `DB_NAME` | PostgreSQL database name |
 | `DB_USERNAME` | PostgreSQL username |
 | `DB_PASSWORD` | PostgreSQL password |

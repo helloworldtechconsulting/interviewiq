@@ -1,6 +1,8 @@
 package com.interviewiq.email.domain;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.UUID;
@@ -50,6 +52,7 @@ public class EmailEvent {
     private EmailStatus status = EmailStatus.QUEUED;
 
     /** Template variables and email body snapshot as JSON. */
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(columnDefinition = "jsonb")
     private String payloadJson;
 
@@ -94,6 +97,7 @@ public class EmailEvent {
     public void setSentAt(OffsetDateTime sentAt) { this.sentAt = sentAt; }
 
     public OffsetDateTime getCreatedAt() { return createdAt; }
+    public void setCreatedAt(OffsetDateTime createdAt) { this.createdAt = createdAt; } // ← ADD KARO
 
     @Override
     public String toString() {

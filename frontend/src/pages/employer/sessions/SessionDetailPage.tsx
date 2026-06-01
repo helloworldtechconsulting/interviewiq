@@ -43,7 +43,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { Badge } from "@/components/ui/badge";
 import { cn, formatDateTime } from "@/lib/utils";
 import type { EvaluationQuestion } from "@/types";
 
@@ -182,7 +181,7 @@ export function SessionDetailPage() {
     formState: { errors },
   } = useForm<MeetUrlForm>({
     resolver: zodResolver(meetUrlSchema),
-    defaultValues: { meetUrl: session?.meetUrl ?? "" },
+    defaultValues: { meetUrl: session?. meetUrl ?? "" },
   });
 
   const meetUrlMutation = useMutation({
@@ -240,14 +239,14 @@ export function SessionDetailPage() {
 
   // ── Radar chart data ───────────────────────────────────────────────────────
 
-  const radarData = evaluation
-    ? [
-        { subject: "Technical", score: evaluation.scores.technicalSkills },
-        { subject: "Communication", score: evaluation.scores.communication },
-        { subject: "Problem Solving", score: evaluation.scores.problemSolving },
-        { subject: "Culture Fit", score: evaluation.scores.culturalFit },
+  const radarData = evaluation?.scores
+      ? [
+        { subject: "Technical", score: evaluation.scores.technicalSkills ?? 0 },
+        { subject: "Communication", score: evaluation.scores.communication ?? 0 },
+        { subject: "Problem Solving", score: evaluation.scores.problemSolving ?? 0 },
+        { subject: "Culture Fit", score: evaluation.scores.culturalFit ?? 0 },
       ]
-    : [];
+      : [];
 
   const canCancel = session.status === "INVITED" || session.status === "STARTED";
   const canSetUrl = session.status === "INVITED";
@@ -255,8 +254,8 @@ export function SessionDetailPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title={`Interview — ${session.candidateName}`}
-        description={session.jobTitle}
+        title={`Interview — ${session.candidateId.slice(0, 8)}…`}
+        description={`Job ${session.jobOpeningId.slice(0, 8)}…`}
         actions={
           <div className="flex gap-2">
             <Button
@@ -307,42 +306,36 @@ export function SessionDetailPage() {
                 <div className="flex items-start justify-between gap-2">
                   <dt className="text-muted-foreground">Candidate</dt>
                   <dd
-                    className="cursor-pointer font-medium hover:underline text-right"
+                    className="cursor-pointer font-mono text-xs font-medium hover:underline text-right"
                     onClick={() =>
                       navigate(`/app/candidates/${session.candidateId}`)
                     }
                   >
-                    {session.candidateName}
+                    {session.candidateId.slice(0, 8)}…
                   </dd>
                 </div>
                 <div className="flex items-start justify-between gap-2">
                   <dt className="text-muted-foreground">Job</dt>
                   <dd
-                    className="cursor-pointer font-medium hover:underline text-right"
+                    className="cursor-pointer font-mono text-xs font-medium hover:underline text-right"
                     onClick={() =>
-                      navigate(`/app/jobs/${session.jobId}`)
+                      navigate(`/app/jobs/${session.jobOpeningId}`)
                     }
                   >
-                    {session.jobTitle}
+                    {session.jobOpeningId.slice(0, 8)}…
                   </dd>
                 </div>
                 <div className="flex items-start justify-between gap-2">
                   <dt className="text-muted-foreground">Scheduled</dt>
                   <dd className="text-right font-medium">
-                    {formatDateTime(session.scheduledAt)}
+                    {session.scheduledAt ? formatDateTime(session.scheduledAt) : "—"}
                   </dd>
                 </div>
-                <div className="flex items-start justify-between gap-2">
-                  <dt className="text-muted-foreground">Duration</dt>
-                  <dd className="font-medium">
-                    {session.durationMinutes} min
-                  </dd>
-                </div>
-                {session.botId && (
+                {session.durationSeconds != null && (
                   <div className="flex items-start justify-between gap-2">
-                    <dt className="text-muted-foreground">Bot ID</dt>
-                    <dd className="break-all text-right font-mono text-xs">
-                      {session.botId}
+                    <dt className="text-muted-foreground">Duration</dt>
+                    <dd className="font-medium">
+                      {Math.round(session.durationSeconds / 60)} min
                     </dd>
                   </div>
                 )}
@@ -371,7 +364,7 @@ export function SessionDetailPage() {
                     id="meetUrl"
                     type="url"
                     placeholder="https://meet.google.com/..."
-                    defaultValue={session.meetUrl ?? ""}
+                    defaultValue={session. meetUrl ?? ""}
                     {...register("meetUrl")}
                   />
                   {errors.meetUrl && (
@@ -397,18 +390,18 @@ export function SessionDetailPage() {
             </Card>
           )}
 
-          {session.meetUrl && !canSetUrl && (
+          {session. meetUrl && !canSetUrl && (
             <Card>
               <CardContent className="pt-4">
                 <p className="text-xs text-muted-foreground">Meeting URL</p>
                 <a
-                  href={session.meetUrl}
+                  href={session. meetUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="mt-1 flex items-center gap-1 break-all text-sm text-primary hover:underline"
                 >
                   <Link2 className="h-3.5 w-3.5 shrink-0" />
-                  {session.meetUrl}
+                  {session. meetUrl}
                 </a>
               </CardContent>
             </Card>
@@ -417,7 +410,7 @@ export function SessionDetailPage() {
 
         {/* ── Evaluation ────────────────────────────────────────────────────── */}
         <div className="space-y-4 lg:col-span-2">
-          {session.status === "COMPLETED" && evaluation ? (
+          {session.status === "COMPLETED" && evaluation?.scores ? (
             <>
               {/* Overall + radar */}
               <Card>
