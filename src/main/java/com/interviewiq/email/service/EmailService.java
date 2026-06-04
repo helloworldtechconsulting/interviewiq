@@ -16,6 +16,7 @@ import software.amazon.awssdk.services.ses.model.Destination;
 import software.amazon.awssdk.services.ses.model.Message;
 import software.amazon.awssdk.services.ses.model.SendEmailRequest;
 import software.amazon.awssdk.services.ses.model.SendEmailResponse;
+import software.amazon.awssdk.core.exception.SdkException;
 import software.amazon.awssdk.services.ses.model.SesException;
 
 import java.time.OffsetDateTime;
@@ -141,6 +142,37 @@ public class EmailService {
         send(to, subject, body, "CANDIDATE_INVITE", companyId, null);
     }
 
+
+    private static final String LOW_BALANCE_TEMPLATE = """
+        <html><body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2>⚠️ Low Wallet Balance Alert</h2>
+        <p>Hi %s,</p>
+        <p>Your InterviewIQ wallet balance has dropped to <strong>₹%d</strong>.</p>
+        <p>Please top up your wallet to continue scheduling AI interviews.</p>
+        <p style="margin: 30px 0;">
+          <a href="%s/app/billing" style="background: #4F46E5; color: white; padding: 14px 28px;
+             text-decoration: none; border-radius: 6px; font-size: 16px;">
+            Top Up Wallet
+          </a>
+        </p>
+        <p style="color: #888; font-size: 12px;">This is an automated alert from InterviewIQ.</p>
+        </body></html>
+        """;
+
+    @Transactional
+    public void sendLowBalanceAlert(String to, String adminName,
+                                    long balancePaise, UUID companyId,
+                                    String frontendBaseUrl) {
+        String subject = "⚠️ Low wallet balance alert — InterviewIQ";
+        long balanceRupees = balancePaise / 100;
+        String body = LOW_BALANCE_TEMPLATE.formatted(
+                adminName,
+                balanceRupees,
+                frontendBaseUrl
+        );
+        send(to, subject, body, "LOW_BALANCE_ALERT", companyId, null);
+    }
+
     // =========================================================================
     // Private helpers
     // =========================================================================
@@ -152,9 +184,11 @@ public class EmailService {
 
         if (props.isUseLocalStub()) {
             log.info("[SES STUB] to={} subject={} body_chars={}", recipientLower, subject, htmlBody.length());
+            OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+            event.setCreatedAt(now);
             event.setStatus(EmailStatus.SENT);
             event.setProviderMessageId("stub-" + UUID.randomUUID());
-            event.setSentAt(OffsetDateTime.now(ZoneOffset.UTC));
+            event.setSentAt(now);
             emailEventRepository.save(event);
             return;
         }
@@ -172,13 +206,23 @@ public class EmailService {
                     .build();
 
             SendEmailResponse response = sesClient.sendEmail(request);
+            OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);  // ← ADD
+            event.setCreatedAt(now);
             event.setStatus(EmailStatus.SENT);
             event.setProviderMessageId(response.messageId());
-            event.setSentAt(OffsetDateTime.now(ZoneOffset.UTC));
+            event.setSentAt(now);
             log.debug("Email sent: to={} type={} messageId={}", recipientLower, emailType, response.messageId());
 
         } catch (SesException e) {
-            log.warn("SES send failed: to={} type={} error={}", recipientLower, emailType, e.getMessage());
+            // SES service error — invalid recipient, quota exceeded, etc.
+            log.warn("SES service error: to={} type={} error={}", recipientLower, emailType, e.getMessage());
+            event.setStatus(EmailStatus.FAILED);
+        } catch (SdkException e) {
+            // SDK client error — missing credentials, no network, endpoint unreachable.
+            // Common in local dev when AWS is not configured and use-local-stub is false.
+            // Log as WARN (not ERROR) — the request itself succeeded; only email delivery failed.
+            log.warn("SES client error (check AWS credentials or set use-local-stub=true): " +
+                     "to={} type={} error={}", recipientLower, emailType, e.getMessage());
             event.setStatus(EmailStatus.FAILED);
         }
 
@@ -193,6 +237,7 @@ public class EmailService {
         event.setCompanyId(companyId);
         event.setUserId(userId);
         event.setStatus(EmailStatus.QUEUED);
+        event.setCreatedAt(OffsetDateTime.now(ZoneOffset.UTC));
         return event;
     }
 }

@@ -19,6 +19,7 @@ import {
   CreditCard,
   Settings,
   UsersRound,
+  ShieldCheck,
   LogOut,
   Menu,
   X,
@@ -31,19 +32,30 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { authApi } from "@/api/modules/auth";
 import { queryClient } from "@/lib/queryClient";
-
-const navItems = [
-  { to: "/app/dashboard", icon: LayoutDashboard, label: "Dashboard" },
-  { to: "/app/jobs", icon: Briefcase, label: "Jobs" },
-  { to: "/app/candidates", icon: Users, label: "Candidates" },
-  { to: "/app/sessions", icon: Video, label: "Sessions" },
-  { to: "/app/billing", icon: CreditCard, label: "Billing" },
-  { to: "/app/team", icon: UsersRound, label: "Team" },
-  { to: "/app/settings", icon: Settings, label: "Settings" },
-];
+import { useQuery } from "@tanstack/react-query";
+import { billingApi } from "@/api/modules/billing";
+import { queryKeys } from "@/lib/queryKeys";
+import { formatRupees } from "@/lib/utils";
 
 export function AppLayout() {
+  const { data: wallet } = useQuery({
+    queryKey: queryKeys.billing.wallet(),
+    queryFn: billingApi.getWallet,
+  });
   const user = useAuthUser();
+  const navItems = [
+    { to: "/app/dashboard", icon: LayoutDashboard, label: "Dashboard" },
+    { to: "/app/jobs", icon: Briefcase, label: "Jobs" },
+    { to: "/app/candidates", icon: Users, label: "Candidates" },
+    { to: "/app/sessions", icon: Video, label: "Sessions" },
+    { to: "/app/billing", icon: CreditCard, label: "Billing" },
+    ...(user?.role === "SUPER_ADMIN"
+        ? [{ to: "/app/admin", icon: ShieldCheck, label: "Admin" }]
+        : []),
+    { to: "/app/team", icon: UsersRound, label: "Team" },
+    { to: "/app/settings", icon: Settings, label: "Settings" },
+  ];
+
   const { sidebarOpen, toggleSidebar } = useUiStore();
   const navigate = useNavigate();
 
@@ -164,6 +176,28 @@ export function AppLayout() {
 
         {/* Page content */}
         <main className="flex-1 overflow-y-auto p-6">
+
+          {/* ── Low balance banner ── */}
+          {wallet && wallet.balancePaise <= 30000 && (
+              <div className="mb-4 flex items-center justify-between rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-yellow-600">⚠️</span>
+                  <p className="text-sm font-medium text-yellow-800">
+                    Your wallet balance is low ({formatRupees(wallet.balancePaise)}).
+                    Please top up to continue scheduling interviews.
+                  </p>
+                </div>
+                <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-yellow-400 text-yellow-800 hover:bg-yellow-100"
+                    onClick={() => navigate("/app/billing")}
+                >
+                  Top Up
+                </Button>
+              </div>
+          )}
+
           <Outlet />
         </main>
       </div>

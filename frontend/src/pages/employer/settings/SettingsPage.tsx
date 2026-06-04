@@ -223,9 +223,9 @@ export function SettingsPage() {
               <CardContent className="flex flex-col items-center gap-4 pt-4">
                 {/* Preview */}
                 <Avatar className="h-24 w-24">
-                  {(logoPreview ?? company?.logoUrl) && (
+                  {(logoPreview ?? company?.logoS3Key) && (
                     <AvatarImage
-                      src={logoPreview ?? company?.logoUrl}
+                      src={logoPreview ?? company?.logoS3Key}
                       alt={company?.name}
                     />
                   )}
@@ -261,7 +261,7 @@ export function SettingsPage() {
                   ) : (
                     <>
                       <Upload className="mr-2 h-4 w-4" />
-                      {company?.logoUrl ? "Replace Logo" : "Upload Logo"}
+                      {company?.logoS3Key ? "Replace Logo" : "Upload Logo"}
                     </>
                   )}
                 </Button>

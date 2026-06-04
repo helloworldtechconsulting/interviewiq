@@ -46,13 +46,14 @@ public class AuthService {
 
     private static final Logger log = LoggerFactory.getLogger(AuthService.class);
 
-    private final UserRepository        userRepository;
+    private final UserRepository         userRepository;
     private final RefreshTokenRepository refreshTokenRepository;
-    private final CompanyRepository     companyRepository;
-    private final OtpService            otpService;
-    private final TokenService          tokenService;
-    private final PasswordEncoder       passwordEncoder;
-    private final SecurityProperties    securityProperties;
+    private final CompanyRepository      companyRepository;
+    private final OtpService             otpService;
+    private final TokenService           tokenService;
+    private final PasswordEncoder        passwordEncoder;
+    private final SecurityProperties     securityProperties;
+    private final LoginAttemptService    loginAttemptService;
 
     public AuthService(UserRepository userRepository,
                        RefreshTokenRepository refreshTokenRepository,
@@ -60,7 +61,8 @@ public class AuthService {
                        OtpService otpService,
                        TokenService tokenService,
                        PasswordEncoder passwordEncoder,
-                       SecurityProperties securityProperties) {
+                       SecurityProperties securityProperties,
+                       LoginAttemptService loginAttemptService) {
         this.userRepository        = userRepository;
         this.refreshTokenRepository = refreshTokenRepository;
         this.companyRepository     = companyRepository;
@@ -68,6 +70,7 @@ public class AuthService {
         this.tokenService          = tokenService;
         this.passwordEncoder       = passwordEncoder;
         this.securityProperties    = securityProperties;
+        this.loginAttemptService   = loginAttemptService;
     }
 
     // =========================================================================
@@ -157,25 +160,41 @@ public class AuthService {
     /**
      * Authenticates with email + password and returns a token pair.
      *
+     * <p>Enforces per-IP failed-login rate limiting via {@link LoginAttemptService}:
+     * 5 failures within 1 minute triggers a 15-minute lockout for the source IP.
+     *
+     * @param slug      company URL slug
+     * @param request   login credentials
+     * @param clientIp  the client's IP address (extracted by the controller from
+     *                  {@code X-Forwarded-For} or {@code RemoteAddr})
+     * @throws com.interviewiq.shared.exception.RateLimitException if the IP is locked out (HTTP 429)
      * @throws AuthorizationException for any credential failure (no user enumeration)
      */
     @Transactional
-    public AuthResponse login(String slug, LoginRequest request) {
+    public AuthResponse login(String slug, LoginRequest request, String clientIp) {
+        // Check lockout BEFORE any DB work — blocked IPs never hit the database
+        loginAttemptService.checkLockout(clientIp);
+
         Company company = requireCompanyBySlug(slug);
         String email = request.email().toLowerCase();
 
         User user = userRepository
                 .findByCompanyIdAndEmailAndEmailVerifiedTrue(company.getId(), email)
-                .orElseThrow(() -> new AuthorizationException("Invalid credentials."));
+                .orElse(null);
 
-        if (!user.isActive()) {
-            throw new AuthorizationException("Account is disabled.");
-        }
-
-        if (user.getPasswordHash() == null ||
+        if (user == null || !user.isActive() || user.getPasswordHash() == null ||
                 !passwordEncoder.matches(request.password(), user.getPasswordHash())) {
+            // Record failure for ALL failure cases — prevents enumeration while
+            // still tracking failures from the IP perspective
+            loginAttemptService.recordFailure(clientIp);
             throw new AuthorizationException("Invalid credentials.");
         }
+
+        // Successful login — clear any accumulated failures
+        loginAttemptService.resetFailures(clientIp);
+
+        user.setLastLoginAt(OffsetDateTime.now(ZoneOffset.UTC));
+        userRepository.save(user);
 
         log.info("User logged in: userId={}", user.getId());
         return issueTokenPair(user);

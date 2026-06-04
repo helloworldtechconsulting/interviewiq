@@ -128,11 +128,23 @@ app:
       refresh-token-expiration: 30d
     invite:
       secret: ""
-      expiration: 7d
+      expiration: 72h
+    google:
+      # OAuth 2.0 Client ID from Google Cloud Console.
+      # Override per environment — inject in prod as APP_SECURITY_GOOGLE_CLIENT_ID.
+      client-id: ""
+    login-attempt:
+      max-failures: 5          # lock after this many failed logins from one IP
+      window-duration: PT1M    # sliding window for counting failures
+      lockout-duration: PT15M  # how long the IP is blocked after max-failures
     rate-limit:
       capacity: 20          # max burst (tokens per bucket)
       refill-tokens: 10     # tokens added per refill window
       refill-duration: PT1M # refill window (ISO-8601 duration)
+    onboard-rate-limit:
+      capacity: 3           # max burst for POST /api/v1/companies/register per IP
+      refill-tokens: 3      # tokens added per refill window
+      refill-duration: PT30M # 30-minute refill — 3 new companies per 30 min max
   aws:
     region: ap-south-1
     s3-bucket: ""
@@ -147,9 +159,6 @@ app:
   razorpay:
     key-id: ""
     key-secret: ""
-  recall:
-    api-key: ""
-    webhook-secret: ""
 
 # =============================================================================
 # springdoc-openapi — available at /swagger-ui.html and /v3/api-docs

@@ -17,6 +17,8 @@ public record TransactionResponse(
         long              balanceAfterPaise,
         TransactionStatus status,
         String            razorpayOrderId,
+        String            razorpayPaymentId,
+        String            description,
         OffsetDateTime    createdAt
 ) {
     public static TransactionResponse from(WalletTransaction tx) {
@@ -30,6 +32,8 @@ public record TransactionResponse(
                 tx.getBalanceAfterPaise(),
                 tx.getStatus(),
                 tx.getRazorpayOrderId(),
+                tx.getRazorpayPaymentId(),
+                tx.getDescription(),
                 tx.getCreatedAt()
         );
     }

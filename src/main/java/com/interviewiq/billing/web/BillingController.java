@@ -11,11 +11,9 @@ import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.UUID;
 
 /**
  * Billing endpoints for the authenticated company.
@@ -69,5 +67,13 @@ public class BillingController {
     public ApiResponse<TopUpResponse> initiateTopUp(
             @Valid @RequestBody TopUpRequest request) {
         return ApiResponse.ok(walletService.initiateTopUp(request.amountPaise()));
+    }
+    /**
+     * GET /api/v1/billing/transactions/{id}/invoice
+     * Returns the Razorpay invoice URL for a TOPUP transaction.
+     */
+    @GetMapping("/transactions/{id}/invoice")
+    public ApiResponse<String> getInvoiceUrl(@PathVariable UUID id) {
+        return ApiResponse.ok(walletService.getInvoiceUrl(id));
     }
 }

@@ -23,6 +23,7 @@ import {
   ChevronRight,
   Loader2,
   Plus,
+  Download,
 } from "lucide-react";
 
 import { billingApi } from "@/api/modules/billing";
@@ -70,7 +71,7 @@ const PRESETS = [500, 1000, 2000, 5000];
 // ── Transaction icon ──────────────────────────────────────────────────────────
 
 function TxIcon({ type }: { type: TransactionType }) {
-  if (type === "TOPUP" || type === "REFUND" || type === "RELEASE") {
+  if (type === "TOPUP" || type === "REFUND" || type === "RELEASE" || type === "MANUAL_CREDIT") {
     return (
       <div className="flex h-8 w-8 items-center justify-center rounded-full bg-green-100">
         <ArrowDownLeft className="h-4 w-4 text-green-600" />
@@ -289,6 +290,7 @@ export function BillingPage() {
 
   const txLabel: Record<TransactionType, string> = {
     TOPUP: "Wallet Top-up",
+    MANUAL_CREDIT: "Manual Credit",
     RESERVATION: "Session Reserved",
     SETTLEMENT: "Interview Session",
     RELEASE: "Reservation Released",
@@ -296,7 +298,7 @@ export function BillingPage() {
   };
 
   const isCredit = (type: TransactionType) =>
-    type === "TOPUP" || type === "REFUND" || type === "RELEASE";
+    type === "TOPUP" || type === "REFUND" || type === "RELEASE"  || type === "MANUAL_CREDIT" ;
 
   return (
     <div className="space-y-6">
@@ -404,8 +406,33 @@ export function BillingPage() {
                     <p className="text-xs text-muted-foreground">
                       {formatDate(tx.createdAt)}
                     </p>
+                    {tx.transactionType === "MANUAL_CREDIT" ? (
+                        <p className="text-xs text-muted-foreground">
+                          {tx.description}
+                        </p>
+                    ) : (
+                        <p className="text-xs text-muted-foreground">
+                          ≈ {Math.floor(Math.abs(tx.amountPaise) / 5000)} sessions
+                        </p>
+                    )}
                   </div>
                   <div className="text-right">
+                    {tx.transactionType === "TOPUP" && (
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={async () => {
+                              try {
+                                const invoiceUrl = await billingApi.getInvoiceUrl(tx.id);
+                                window.open(invoiceUrl, "_blank");
+                              } catch {
+                                toast.error("Unable to fetch invoice");
+                              }
+                            }}
+                        >
+                          <Download className="h-4 w-4" />
+                        </Button>
+                    )}
                     <p
                       className={
                         isCredit(tx.transactionType)
