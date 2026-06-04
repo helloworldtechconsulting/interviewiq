@@ -21,6 +21,12 @@ import { VerifyEmailPage } from "@/pages/auth/VerifyEmailPage";
 import { ForgotPasswordPage } from "@/pages/auth/ForgotPasswordPage";
 import { ResetPasswordPage } from "@/pages/auth/ResetPasswordPage";
 
+
+const AdminPage = lazy(() =>
+    import("@/pages/employer/admin/AdminPage").then((m) => ({
+      default: m.AdminPage,
+    })),
+);
 // ── Employer pages (lazily loaded) ────────────────────────────────────────────
 const DashboardPage = lazy(() =>
   import("@/pages/employer/dashboard/DashboardPage").then((m) => ({
@@ -120,6 +126,14 @@ export const router = createBrowserRouter([
             path: "/app/dashboard",
             element: <Lazy><DashboardPage /></Lazy>,
           },
+          {
+          path: "/app/admin",
+    element: (
+    <ProtectedRoute allowedRoles={["SUPER_ADMIN"]}>
+      <Lazy><AdminPage /></Lazy>
+    </ProtectedRoute>
+),
+},
           {
             path: "/app/jobs",
             element: <Lazy><JobsPage /></Lazy>,

@@ -19,6 +19,7 @@ import {
   CreditCard,
   Settings,
   UsersRound,
+  ShieldCheck,
   LogOut,
   Menu,
   X,
@@ -36,22 +37,25 @@ import { billingApi } from "@/api/modules/billing";
 import { queryKeys } from "@/lib/queryKeys";
 import { formatRupees } from "@/lib/utils";
 
-const navItems = [
-  { to: "/app/dashboard", icon: LayoutDashboard, label: "Dashboard" },
-  { to: "/app/jobs", icon: Briefcase, label: "Jobs" },
-  { to: "/app/candidates", icon: Users, label: "Candidates" },
-  { to: "/app/sessions", icon: Video, label: "Sessions" },
-  { to: "/app/billing", icon: CreditCard, label: "Billing" },
-  { to: "/app/team", icon: UsersRound, label: "Team" },
-  { to: "/app/settings", icon: Settings, label: "Settings" },
-];
-
 export function AppLayout() {
   const { data: wallet } = useQuery({
     queryKey: queryKeys.billing.wallet(),
     queryFn: billingApi.getWallet,
   });
   const user = useAuthUser();
+  const navItems = [
+    { to: "/app/dashboard", icon: LayoutDashboard, label: "Dashboard" },
+    { to: "/app/jobs", icon: Briefcase, label: "Jobs" },
+    { to: "/app/candidates", icon: Users, label: "Candidates" },
+    { to: "/app/sessions", icon: Video, label: "Sessions" },
+    { to: "/app/billing", icon: CreditCard, label: "Billing" },
+    ...(user?.role === "SUPER_ADMIN"
+        ? [{ to: "/app/admin", icon: ShieldCheck, label: "Admin" }]
+        : []),
+    { to: "/app/team", icon: UsersRound, label: "Team" },
+    { to: "/app/settings", icon: Settings, label: "Settings" },
+  ];
+
   const { sidebarOpen, toggleSidebar } = useUiStore();
   const navigate = useNavigate();
 

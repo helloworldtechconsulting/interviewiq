@@ -29,7 +29,7 @@ export interface ApiError {
 
 // ── Enums ─────────────────────────────────────────────────────────────────────
 
-export type UserRole = "ADMIN" | "RECRUITER" | "VIEWER";
+export type UserRole = "ADMIN" | "RECRUITER" | "VIEWER" | "SUPER_ADMIN";
 
 export type CompanyStatus = "ACTIVE" | "INACTIVE" | "SUSPENDED";
 
@@ -53,6 +53,7 @@ export type SessionStatus =
 
 export type TransactionType =
   | "TOPUP"
+    | "MANUAL_CREDIT"
   | "RESERVATION"
   | "SETTLEMENT"
   | "RELEASE"

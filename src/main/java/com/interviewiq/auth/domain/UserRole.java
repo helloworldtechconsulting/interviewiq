@@ -4,5 +4,6 @@ package com.interviewiq.auth.domain;
 public enum UserRole {
     ADMIN,
     RECRUITER,
-    VIEWER
+    VIEWER,
+    SUPER_ADMIN,
 }

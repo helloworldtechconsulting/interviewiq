@@ -338,6 +338,31 @@ public class WalletService {
         tx.setStatus(TransactionStatus.CONFIRMED);
         return tx;
     }
+    /**
+     * Manually credits a company wallet — for refunds or promotional credits.
+     * Only callable by SUPER_ADMIN.
+     *
+     * @param companyId   company to credit
+     * @param amountPaise amount to credit
+     * @param reason      mandatory reason for the credit
+     */
+    @Transactional
+    public WalletTransaction manualCredit(UUID companyId, long amountPaise, String reason) {
+        Wallet wallet = requireWalletByCompanyId(companyId);
+
+        wallet.setBalancePaise(wallet.getBalancePaise() + amountPaise);
+        walletRepository.save(wallet);
+
+        WalletTransaction tx = buildTransaction(
+                wallet, null,    TransactionType.MANUAL_CREDIT, amountPaise, wallet.getBalancePaise());
+        tx.setDescription(reason);
+        txRepository.save(tx);
+
+        log.info("Manual credit applied: companyId={} amountPaise={} reason={}",
+                companyId, amountPaise, reason);
+
+        return tx;
+    }
 private void triggerLowBalanceAlert(UUID companyId, long balancePaise) {
     try {
         userRepository.findAllByCompanyIdOrderByFullNameAsc(companyId)

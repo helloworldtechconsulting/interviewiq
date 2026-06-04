@@ -79,6 +79,11 @@ const ROLE_META: Record<
     icon: <Eye className="h-3 w-3" />,
     colour: "bg-gray-100 text-gray-700",
   },
+  SUPER_ADMIN: {
+    label: "Super Admin",
+    icon: <ShieldCheck className="h-3 w-3" />,
+    colour: "bg-red-100 text-red-700",
+  },
 };
 
 function RoleBadge({ role }: { role: UserRole }) {
@@ -202,7 +207,7 @@ function InviteDialog({ open, onOpenChange }: InviteDialogProps) {
             <Select
               value={role}
               onValueChange={(v) =>
-                setValue("role", v as UserRole, { shouldValidate: true })
+                  setValue("role", v as "ADMIN" | "RECRUITER" | "VIEWER", { shouldValidate: true })
               }
             >
               <SelectTrigger>

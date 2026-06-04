@@ -14,5 +14,7 @@ public enum TransactionType {
     /** Reservation returned — session cancelled before completion. */
     RELEASE,
     /** Manual credit adjustment by platform admin. */
+    MANUAL_CREDIT,
+    /** Manual credit adjustment by platform admin. */
     REFUND
 }
