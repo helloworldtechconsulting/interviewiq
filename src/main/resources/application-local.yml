@@ -58,6 +58,8 @@ spring:
 # Logging — more verbose in local to aid migration and startup debugging
 # =============================================================================
 logging:
+  file:
+    name: C:/Users/Nural/Claude-Project/backend-current.log
   level:
     com.interviewiq:               DEBUG
     org.flywaydb:                  DEBUG
