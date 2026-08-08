@@ -24,7 +24,6 @@ import { candidatesApi } from "@/api/modules/candidates";
 import { jobsApi } from "@/api/modules/jobs";
 import { queryKeys } from "@/lib/queryKeys";
 import { AppError } from "@/api/client";
-import type { CandidateStatus } from "@/types";
 import { PageHeader } from "@/components/common/PageHeader";
 import { EmptyState } from "@/components/common/EmptyState";
 import { StatusBadge } from "@/components/common/StatusBadge";
@@ -53,26 +52,13 @@ const PAGE_SIZE = 12;
 // ── Create candidate schema ───────────────────────────────────────────────────
 
 const addSchema = z.object({
-  jobId: z.string().min(1, "Please select a job"),
+  jobOpeningId: z.string().min(1, "Please select a job"),
   fullName: z.string().min(2, "Name must be at least 2 characters"),
   email: z.string().email("Invalid email"),
   phone: z.string().optional(),
 });
 
 type AddForm = z.infer<typeof addSchema>;
-
-// ── Status options ────────────────────────────────────────────────────────────
-
-const STATUS_OPTIONS: { label: string; value: string }[] = [
-  { label: "All statuses", value: "ALL" },
-  { label: "Applied", value: "APPLIED" },
-  { label: "Screening", value: "SCREENING" },
-  { label: "Interview Scheduled", value: "INTERVIEW_SCHEDULED" },
-  { label: "Interview Done", value: "INTERVIEW_DONE" },
-  { label: "Offer Extended", value: "OFFER_EXTENDED" },
-  { label: "Hired", value: "HIRED" },
-  { label: "Rejected", value: "REJECTED" },
-];
 
 // ── Add Candidate Dialog ──────────────────────────────────────────────────────
 
@@ -106,10 +92,10 @@ function AddCandidateDialog({
     formState: { errors },
   } = useForm<AddForm>({
     resolver: zodResolver(addSchema),
-    defaultValues: { jobId: defaultJobId ?? "" },
+    defaultValues: { jobOpeningId: defaultJobId ?? "" },
   });
 
-  const selectedJobId = watch("jobId");
+  const selectedJobId = watch("jobOpeningId");
 
   const mutation = useMutation({
     mutationFn: candidatesApi.create,
@@ -138,7 +124,7 @@ function AddCandidateDialog({
       open={open}
       onOpenChange={(v) => {
         if (!mutation.isPending) {
-          reset({ jobId: defaultJobId ?? "" });
+          reset({ jobOpeningId: defaultJobId ?? "" });
           onOpenChange(v);
         }
       }}
@@ -156,7 +142,7 @@ function AddCandidateDialog({
               <Select
                 value={selectedJobId}
                 onValueChange={(v) =>
-                  setValue("jobId", v, { shouldValidate: true })
+                  setValue("jobOpeningId", v, { shouldValidate: true })
                 }
               >
                 <SelectTrigger>
@@ -170,9 +156,9 @@ function AddCandidateDialog({
                   ))}
                 </SelectContent>
               </Select>
-              {errors.jobId && (
+              {errors.jobOpeningId && (
                 <p className="text-xs text-destructive">
-                  {errors.jobId.message}
+                  {errors.jobOpeningId.message}
                 </p>
               )}
             </div>
@@ -251,7 +237,6 @@ export function CandidatesPage() {
   const defaultJobId = searchParams.get("jobId") ?? undefined;
 
   const [page, setPage] = useState(0);
-  const [statusFilter, setStatusFilter] = useState("ALL");
   const [jobIdFilter, setJobIdFilter] = useState(defaultJobId ?? "ALL");
   const [search, setSearch] = useState("");
   const [addOpen, setAddOpen] = useState(false);
@@ -262,22 +247,18 @@ export function CandidatesPage() {
     queryFn: () => jobsApi.list({ status: "OPEN", size: 100 }),
   });
 
-  const queryStatus =
-    statusFilter === "ALL" ? undefined : (statusFilter as CandidateStatus);
-  const queryJobId = jobIdFilter === "ALL" ? undefined : jobIdFilter;
+  const queryJobOpeningId = jobIdFilter === "ALL" ? undefined : jobIdFilter;
 
   const { data, isLoading } = useQuery({
     queryKey: queryKeys.candidates.list({
       page,
-      status: queryStatus,
-      jobId: queryJobId,
+      jobOpeningId: queryJobOpeningId,
     }),
     queryFn: () =>
       candidatesApi.list({
         page,
         size: PAGE_SIZE,
-        status: queryStatus,
-        jobId: queryJobId,
+        jobOpeningId: queryJobOpeningId,
       }),
   });
 
@@ -337,26 +318,6 @@ export function CandidatesPage() {
             ))}
           </SelectContent>
         </Select>
-
-        {/* Status filter */}
-        <Select
-          value={statusFilter}
-          onValueChange={(v) => {
-            setStatusFilter(v);
-            setPage(0);
-          }}
-        >
-          <SelectTrigger className="w-full sm:w-48">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {STATUS_OPTIONS.map((o) => (
-              <SelectItem key={o.value} value={o.value}>
-                {o.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
       </div>
 
       {/* ── Candidate grid ───────────────────────────────────────────────────── */}
@@ -394,12 +355,12 @@ export function CandidatesPage() {
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary">
                     {c.fullName.charAt(0).toUpperCase()}
                   </div>
-                  <StatusBadge kind="candidate" status={c.status} />
+                  <StatusBadge kind="pipeline" status={c.resumeExtractionStatus} />
                 </div>
                 <div className="mt-3">
                   <p className="font-semibold">{c.fullName}</p>
-                  <p className="mt-0.5 text-xs font-medium text-muted-foreground">
-                    {c.jobTitle}
+                  <p className="mt-0.5 font-mono text-xs text-muted-foreground">
+                    Job {c.jobOpeningId.slice(0, 8)}…
                   </p>
                   <div className="mt-2 space-y-1">
                     <p className="flex items-center gap-1.5 text-xs text-muted-foreground">

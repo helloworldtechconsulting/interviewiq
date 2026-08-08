@@ -170,7 +170,10 @@ public class WalletService {
     // =========================================================================
 
     /**
-     * Ring-fences {@code amountPaise} from the available balance when a session starts.
+     * Ring-fences {@code amountPaise} from the available balance when a session is
+     * <em>created</em> (INVITED state) — not when it later starts. The reservation is
+     * therefore outstanding for the whole invite window and must be released if the
+     * session is cancelled, fails, or expires unaccepted.
      * Throws {@link InsufficientBalanceException} if available funds are insufficient.
      */
     @Transactional

@@ -11,6 +11,7 @@ import com.interviewiq.auth.dto.ResetPasswordRequest;
 import com.interviewiq.auth.dto.VerifyEmailRequest;
 import com.interviewiq.auth.service.AuthService;
 import com.interviewiq.shared.dto.ApiResponse;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -81,12 +82,26 @@ public class AuthController {
     /**
      * POST /api/v1/{slug}/auth/login
      * Authenticates with email + password and returns a token pair.
+     *
+     * <p>The client IP is extracted from {@code X-Forwarded-For} (set by ALB/CloudFront)
+     * and passed to {@link com.interviewiq.auth.service.AuthService#login} for
+     * per-IP failed-login rate limiting.
      */
     @PostMapping("/login")
     public ApiResponse<AuthResponse> login(
             @PathVariable String slug,
-            @Valid @RequestBody LoginRequest request) {
-        return ApiResponse.ok(authService.login(slug, request));
+            @Valid @RequestBody LoginRequest request,
+            HttpServletRequest httpRequest) {
+        String clientIp = resolveClientIp(httpRequest);
+        return ApiResponse.ok(authService.login(slug, request, clientIp));
+    }
+
+    private static String resolveClientIp(HttpServletRequest request) {
+        String xff = request.getHeader("X-Forwarded-For");
+        if (xff != null && !xff.isBlank()) {
+            return xff.split(",")[0].strip();
+        }
+        return request.getRemoteAddr();
     }
 
     /**

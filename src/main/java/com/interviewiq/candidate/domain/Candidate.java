@@ -61,6 +61,18 @@ public class Candidate {
     @Column(nullable = false, length = 50)
     private PipelineStatus resumeExtractionStatus = PipelineStatus.PENDING;
 
+    @Column(length = 30)
+    private String phone;
+
+    @Column(length = 255)
+    private String googleSubject;
+
+    @Column(length = 255)
+    private String googleEmail;
+
+    @Column(nullable = false)
+    private boolean googleVerified = false;
+
     @Column(nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 
@@ -104,6 +116,18 @@ public class Candidate {
 
     public PipelineStatus getResumeExtractionStatus() { return resumeExtractionStatus; }
     public void setResumeExtractionStatus(PipelineStatus status) { this.resumeExtractionStatus = status; }
+
+    public String getPhone() { return phone; }
+    public void setPhone(String phone) { this.phone = phone; }
+
+    public String getGoogleSubject() { return googleSubject; }
+    public void setGoogleSubject(String googleSubject) { this.googleSubject = googleSubject; }
+
+    public String getGoogleEmail() { return googleEmail; }
+    public void setGoogleEmail(String googleEmail) { this.googleEmail = googleEmail; }
+
+    public boolean isGoogleVerified() { return googleVerified; }
+    public void setGoogleVerified(boolean googleVerified) { this.googleVerified = googleVerified; }
 
     public OffsetDateTime getCreatedAt() { return createdAt; }
     public OffsetDateTime getUpdatedAt() { return updatedAt; }

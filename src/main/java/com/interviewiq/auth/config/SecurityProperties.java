@@ -25,11 +25,15 @@ import java.time.Duration;
 @ConfigurationProperties(prefix = "app.security")
 public class SecurityProperties {
 
-    private final Jwt jwt = new Jwt();
-    private final Invite invite = new Invite();
+    private final Jwt          jwt          = new Jwt();
+    private final Invite       invite       = new Invite();
+    private final Google       google       = new Google();
+    private final LoginAttempt loginAttempt = new LoginAttempt();
 
-    public Jwt getJwt() { return jwt; }
-    public Invite getInvite() { return invite; }
+    public Jwt          getJwt()          { return jwt; }
+    public Invite       getInvite()       { return invite; }
+    public Google       getGoogle()       { return google; }
+    public LoginAttempt getLoginAttempt() { return loginAttempt; }
 
     // =========================================================================
     // JWT (RS256 asymmetric — employer access tokens)
@@ -98,5 +102,31 @@ public class SecurityProperties {
 
         public Duration getExpiration() { return expiration; }
         public void setExpiration(Duration expiration) { this.expiration = expiration; }
+    }
+
+    public static class Google {
+
+        private String clientId = "";
+
+        public String getClientId() { return clientId; }
+        public void setClientId(String clientId) { this.clientId = clientId; }
+    }
+
+    public static class LoginAttempt {
+
+        private int maxFailures = 5;
+
+        private Duration windowDuration = Duration.ofMinutes(1);
+
+        private Duration lockoutDuration = Duration.ofMinutes(15);
+
+        public int getMaxFailures() { return maxFailures; }
+        public void setMaxFailures(int maxFailures) { this.maxFailures = maxFailures; }
+
+        public Duration getWindowDuration() { return windowDuration; }
+        public void setWindowDuration(Duration windowDuration) { this.windowDuration = windowDuration; }
+
+        public Duration getLockoutDuration() { return lockoutDuration; }
+        public void setLockoutDuration(Duration lockoutDuration) { this.lockoutDuration = lockoutDuration; }
     }
 }

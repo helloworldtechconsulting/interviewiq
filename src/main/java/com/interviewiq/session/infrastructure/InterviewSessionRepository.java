@@ -6,10 +6,6 @@ import com.interviewiq.shared.domain.PipelineStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Modifying;
-import org.springframework.data.jpa.repository.Query;
-
-import org.springframework.data.repository.query.Param;
 
 import java.time.OffsetDateTime;
 import java.util.Collection;
@@ -33,8 +29,8 @@ public interface InterviewSessionRepository extends JpaRepository<InterviewSessi
 
     Optional<InterviewSession> findByInviteTokenHash(String inviteTokenHash);
 
-    /** Sessions where the invite window has elapsed but status is still INVITED — for SessionExpiryJob. */
-    List<InterviewSession> findAllByStatusAndInviteExpiresAtBefore(SessionStatus status, OffsetDateTime threshold);
+    Page<InterviewSession> findByStatusAndInviteExpiresAtBefore(
+            SessionStatus status, OffsetDateTime threshold, Pageable pageable);
 
     /** Sessions awaiting AI question generation — for QuestionGenerationWorker. */
     List<InterviewSession> findAllByQuestionGenerationStatus(PipelineStatus status);
@@ -44,13 +40,4 @@ public interface InterviewSessionRepository extends JpaRepository<InterviewSessi
      * Safe because fixedDelay prevents concurrent scheduler runs within a single JVM.
      */
     List<InterviewSession> findAllByQuestionGenerationStatusIn(Collection<PipelineStatus> statuses);
-
-    /** Bulk-expire INVITED sessions whose invite window has passed. */
-    @Modifying
-    @Query("UPDATE InterviewSession s SET s.status = :expiredStatus, s.updatedAt = :now " +
-           "WHERE s.status = :invitedStatus AND s.inviteExpiresAt < :threshold")
-    int expireStaleInvites(@Param("invitedStatus")  SessionStatus invitedStatus,
-                           @Param("expiredStatus")  SessionStatus expiredStatus,
-                           @Param("threshold")      OffsetDateTime threshold,
-                           @Param("now")            OffsetDateTime now);
 }

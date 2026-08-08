@@ -46,6 +46,22 @@ public class Company {
     @Column(nullable = false, length = 50)
     private CompanyStatus status = CompanyStatus.ACTIVE;
 
+    @Column(columnDefinition = "TEXT")
+    private String website;
+
+    @Column(length = 100)
+    private String industry;
+
+    @Column(name = "logo_s3_key", length = 512)
+    private String logoS3Key;
+
+    @Enumerated(EnumType.STRING)
+    @Column(length = 50)
+    private CompanySize size;
+
+    @Column(name = "gst_number", length = 20)
+    private String gstNumber;
+
     @Column(nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 
@@ -80,6 +96,21 @@ public class Company {
 
     public CompanyStatus getStatus() { return status; }
     public void setStatus(CompanyStatus status) { this.status = status; }
+
+    public String getWebsite() { return website; }
+    public void setWebsite(String website) { this.website = website; }
+
+    public String getIndustry() { return industry; }
+    public void setIndustry(String industry) { this.industry = industry; }
+
+    public String getLogoS3Key() { return logoS3Key; }
+    public void setLogoS3Key(String logoS3Key) { this.logoS3Key = logoS3Key; }
+
+    public CompanySize getSize() { return size; }
+    public void setSize(CompanySize size) { this.size = size; }
+
+    public String getGstNumber() { return gstNumber; }
+    public void setGstNumber(String gstNumber) { this.gstNumber = gstNumber; }
 
     public OffsetDateTime getCreatedAt() { return createdAt; }
     public OffsetDateTime getUpdatedAt() { return updatedAt; }

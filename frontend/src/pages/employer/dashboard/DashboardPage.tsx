@@ -186,12 +186,14 @@ export function DashboardPage() {
                   onClick={() => navigate(`/app/sessions/${s.id}`)}
                 >
                   <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
-                    {s.candidateName.charAt(0).toUpperCase()}
+                    {s.candidateId.slice(0, 2).toUpperCase()}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium">{s.candidateName}</p>
+                    <p className="truncate font-mono text-sm font-medium">
+                      {s.candidateId.slice(0, 8)}…
+                    </p>
                     <p className="truncate text-xs text-muted-foreground">
-                      {s.jobTitle} · {formatDateTime(s.scheduledAt)}
+                      {s.scheduledAt ? formatDateTime(s.scheduledAt) : "—"}
                     </p>
                   </div>
                   <StatusBadge kind="session" status={s.status} />

@@ -130,6 +130,7 @@ public class TokenConfig {
      */
     private byte[] decodePem(String pem, String label) {
         String cleaned = pem
+                .replace("\\n", "\n")
                 .replace("-----BEGIN " + label + "-----", "")
                 .replace("-----END " + label + "-----", "")
                 .replaceAll("\\s+", "");

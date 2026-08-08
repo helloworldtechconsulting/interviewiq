@@ -25,19 +25,26 @@ import java.util.List;
  * Scheduled worker that drives the AI evaluation pipeline for completed interview sessions.
  *
  * <h2>Trigger</h2>
- * <p>The {@code bot.done} webhook transitions the session to {@code COMPLETED} and
- * sets the {@code EvaluationReport.generationStatus} to {@code PENDING} (it was created
- * as a stub in {@code SessionService.create()}). This worker picks up those PENDING reports.
+ * <p>When the candidate's browser submits {@code POST /api/v1/candidate/interview/complete},
+ * {@code SessionService.completeInterview()} transitions the session to {@code COMPLETED} and
+ * resets the {@code EvaluationReport.generationStatus} to {@code PENDING}.
+ * This worker picks up those PENDING reports on the next poll cycle.
  *
  * <h2>Input to the LLM</h2>
- * <ul>
- *   <li>The pre-generated {@code questionsJson} from the session (produced by
- *       {@link QuestionGenerationWorker}).
- *   <li>In a production integration: the session transcript downloaded from the
- *       Recall.ai API using the {@code recallBotId}. In the current stub-mode
- *       implementation, a placeholder transcript is used when the Recall.ai API key
- *       is blank.
- * </ul>
+ * <p>The {@code questionsJson} field on the session contains both the pre-generated questions
+ * and the candidate's spoken transcripts (merged by {@code SessionService.completeInterview}).
+ * Each question object has the shape:
+ * <pre>
+ * {
+ *   "order": 1,
+ *   "text": "Tell me about yourself",
+ *   "dimension": "COMMUNICATION",
+ *   "answer": "I have five years of Java experience..."   ← added by browser
+ * }
+ * </pre>
+ *
+ * <p>This eliminates the Recall.ai transcript dependency entirely — no external API
+ * calls are needed to fetch the transcript.
  *
  * <h2>Output</h2>
  * <p>The LLM returns a structured JSON with per-dimension scores and an overall
@@ -61,7 +68,6 @@ public class EvaluationWorker {
     private final InterviewSessionRepository  sessionRepository;
     private final ChatClient                  chatClient;
     private final ObjectMapper                objectMapper;
-    private final RecallTranscriptClient      recallTranscriptClient;
 
     /**
      * Self-reference injected lazily to route {@link #evaluateSingle} calls through
@@ -74,13 +80,11 @@ public class EvaluationWorker {
     public EvaluationWorker(EvaluationReportRepository evaluationReportRepository,
                             InterviewSessionRepository sessionRepository,
                             ChatClient chatClient,
-                            ObjectMapper objectMapper,
-                            RecallTranscriptClient recallTranscriptClient) {
+                            ObjectMapper objectMapper) {
         this.evaluationReportRepository = evaluationReportRepository;
         this.sessionRepository          = sessionRepository;
         this.chatClient                 = chatClient;
         this.objectMapper               = objectMapper;
-        this.recallTranscriptClient     = recallTranscriptClient;
     }
 
     /**
@@ -152,8 +156,7 @@ public class EvaluationWorker {
 
     private String callLlm(InterviewSession session, EvaluationReport report) throws JsonProcessingException {
         String questionsJson = session.getQuestionsJson();
-        String transcript    = resolveTranscript(session);
-        String prompt        = buildEvaluationPrompt(questionsJson, transcript);
+        String prompt        = buildEvaluationPrompt(questionsJson);
 
         String rawResponse = chatClient.prompt()
                 .user(prompt)
@@ -165,45 +168,26 @@ public class EvaluationWorker {
     }
 
     /**
-     * Resolves the interview transcript for the given session.
+     * Builds the evaluation prompt from the session's {@code questionsJson}.
      *
-     * <p>Delegates to {@link RecallTranscriptClient}, which:
-     * <ul>
-     *   <li>Returns a stub transcript when {@code app.recall.api-key} is blank
-     *       (local / CI mode) — allows the evaluation pipeline to run end-to-end
-     *       without a live Recall.ai account.</li>
-     *   <li>Calls {@code GET https://api.recall.ai/api/v1/bot/{botId}/transcript/}
-     *       with full pagination support in production.</li>
-     * </ul>
+     * <p>The questions JSON contains both the pre-generated questions and the
+     * candidate's spoken answers (merged during session completion).
      *
-     * <p>When {@code recallBotId} is null or blank the session has no recording
-     * (e.g. the candidate never joined), so a placeholder text is returned
-     * rather than making a pointless network call. The evaluator will still
-     * run and produce scores, but they will reflect the absence of content.
-     *
-     * @throws BotServiceException propagated from {@link RecallTranscriptClient}
-     *         on HTTP error or network failure — causes this attempt to be
-     *         retried on the next poll cycle.
+     * <p>If a question's {@code "answer"} field is absent or empty (e.g. the
+     * candidate skipped a question or the STT engine returned nothing), the
+     * evaluator will treat it as a blank answer.
      */
-    private String resolveTranscript(InterviewSession session) {
-        String botId = session.getRecallBotId();
-        if (botId == null || botId.isBlank()) {
-            log.info("EvaluationWorker: no recallBotId for sessionId={} — no recording available",
-                    session.getId());
-            return "[NO RECORDING — candidate did not join the interview session]";
-        }
-        return recallTranscriptClient.fetchTranscript(botId);
-    }
+    private String buildEvaluationPrompt(String questionsJson) {
+        String qaSection = formatQuestionsForPrompt(questionsJson);
 
-    private String buildEvaluationPrompt(String questionsJson, String transcript) {
         return """
-                You are an expert interview evaluator. Evaluate the following interview session.
+                You are an expert interview evaluator. Evaluate the following AI-conducted interview.
 
-                ## Interview Questions
-                """ + questionsJson + """
+                The interview was conducted in-browser using text-to-speech (questions) and
+                speech-to-text (candidate answers via Web Speech API).
 
-                ## Interview Transcript
-                """ + transcript + """
+                ## Questions and Candidate Answers
+                """ + qaSection + """
 
                 ## Scoring Instructions
                 Score each dimension on a 0–10 integer scale:
@@ -215,6 +199,7 @@ public class EvaluationWorker {
                 Compute overall_score as an integer 0–100 weighted composite:
                   overall = (technical * 3 + communication * 2 + relevance * 3 + problem_solving * 2)
 
+                If a candidate's answer is blank or very short, score that question's dimensions low.
                 Choose recommendation from: STRONG_HIRE, HIRE, NO_HIRE, STRONG_NO_HIRE
 
                 ## Output Format
@@ -231,6 +216,43 @@ public class EvaluationWorker {
                   "areas_for_improvement": ["<area 1>", "<area 2>"]
                 }
                 """;
+    }
+
+    private String formatQuestionsForPrompt(String questionsJson) {
+        if (questionsJson == null || questionsJson.isBlank()) {
+            return "[NO QUESTIONS AVAILABLE — question generation may not have completed]";
+        }
+
+        try {
+            JsonNode questions = objectMapper.readTree(questionsJson);
+            if (!questions.isArray() || questions.isEmpty()) {
+                return questionsJson;
+            }
+
+            StringBuilder sb = new StringBuilder();
+            for (JsonNode q : questions) {
+                int order = q.path("order").asInt();
+                String text = q.path("text").asText("");
+                String answer = q.path("answer").asText("").strip();
+                String dimension = q.path("dimension").asText("");
+
+                sb.append("Q").append(order);
+                if (!dimension.isBlank()) sb.append(" [").append(dimension).append("]");
+                sb.append(": ").append(text).append("\n");
+                sb.append("A: ");
+                if (answer.isBlank()) {
+                    sb.append("[No answer provided]");
+                } else {
+                    sb.append(answer);
+                }
+                sb.append("\n\n");
+            }
+            return sb.toString().strip();
+
+        } catch (JsonProcessingException e) {
+            log.warn("EvaluationWorker: could not parse questionsJson for formatting — using raw JSON");
+            return questionsJson;
+        }
     }
 
     /**

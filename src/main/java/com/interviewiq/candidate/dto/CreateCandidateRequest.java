@@ -19,5 +19,8 @@ public record CreateCandidateRequest(
 
         @NotBlank(message = "Full name is required.")
         @Size(max = 255)
-        String fullName
+        String fullName,
+
+        @Size(max = 30, message = "Phone number must be at most 30 characters.")
+        String phone
 ) {}

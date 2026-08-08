@@ -2,6 +2,8 @@ package com.interviewiq.session.domain;
 
 import com.interviewiq.shared.domain.PipelineStatus;
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.UUID;
@@ -45,20 +47,14 @@ public class InterviewSession {
     @Column(nullable = false, updatable = false)
     private UUID candidateId;
 
+    private OffsetDateTime scheduledAt;
+
     /** BCrypt hash of the invite token. Raw token is never stored. */
     @Column(nullable = false, unique = true, length = 255)
     private String inviteTokenHash;
 
     @Column(nullable = false)
     private OffsetDateTime inviteExpiresAt;
-
-    /** Recall.ai bot identifier, assigned asynchronously after bot.joined webhook. */
-    @Column(length = 255)
-    private String recallBotId;
-
-    /** Google Meet URL supplied to the Recall.ai bot to join the call. */
-    @Column(length = 512)
-    private String googleMeetUrl;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 50)
@@ -73,12 +69,29 @@ public class InterviewSession {
      * completes. Structure: [{"order":1,"text":"...","dimension":"TECHNICAL"}, ...]
      * NULL while questionGenerationStatus is PENDING, IN_PROGRESS, or FAILED.
      */
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(columnDefinition = "jsonb")
     private String questionsJson;
 
     private OffsetDateTime startedAt;
 
     private OffsetDateTime endedAt;
+
+    @Column(unique = true, length = 255)
+    private String roomTokenHash;
+
+    private OffsetDateTime roomTokenExpiresAt;
+
+    private Integer durationSeconds;
+
+    @Column(name = "recording_s3_key", length = 512)
+    private String recordingS3Key;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "proctoring_flags_jsonb", columnDefinition = "jsonb")
+    private String proctoringFlagsJsonb;
+
+    private OffsetDateTime cancelledAt;
 
     /** Structured error code for ERROR state. E.g. BOT_JOIN_TIMEOUT. */
     @Column(length = 100)
@@ -126,12 +139,6 @@ public class InterviewSession {
     public OffsetDateTime getInviteExpiresAt() { return inviteExpiresAt; }
     public void setInviteExpiresAt(OffsetDateTime inviteExpiresAt) { this.inviteExpiresAt = inviteExpiresAt; }
 
-    public String getRecallBotId() { return recallBotId; }
-    public void setRecallBotId(String recallBotId) { this.recallBotId = recallBotId; }
-
-    public String getGoogleMeetUrl() { return googleMeetUrl; }
-    public void setGoogleMeetUrl(String googleMeetUrl) { this.googleMeetUrl = googleMeetUrl; }
-
     public SessionStatus getStatus() { return status; }
     public void setStatus(SessionStatus status) { this.status = status; }
 
@@ -141,11 +148,32 @@ public class InterviewSession {
     public String getQuestionsJson() { return questionsJson; }
     public void setQuestionsJson(String questionsJson) { this.questionsJson = questionsJson; }
 
+    public OffsetDateTime getScheduledAt() { return scheduledAt; }
+    public void setScheduledAt(OffsetDateTime scheduledAt) { this.scheduledAt = scheduledAt; }
+
     public OffsetDateTime getStartedAt() { return startedAt; }
     public void setStartedAt(OffsetDateTime startedAt) { this.startedAt = startedAt; }
 
     public OffsetDateTime getEndedAt() { return endedAt; }
     public void setEndedAt(OffsetDateTime endedAt) { this.endedAt = endedAt; }
+
+    public String getRoomTokenHash() { return roomTokenHash; }
+    public void setRoomTokenHash(String roomTokenHash) { this.roomTokenHash = roomTokenHash; }
+
+    public OffsetDateTime getRoomTokenExpiresAt() { return roomTokenExpiresAt; }
+    public void setRoomTokenExpiresAt(OffsetDateTime roomTokenExpiresAt) { this.roomTokenExpiresAt = roomTokenExpiresAt; }
+
+    public Integer getDurationSeconds() { return durationSeconds; }
+    public void setDurationSeconds(Integer durationSeconds) { this.durationSeconds = durationSeconds; }
+
+    public String getRecordingS3Key() { return recordingS3Key; }
+    public void setRecordingS3Key(String recordingS3Key) { this.recordingS3Key = recordingS3Key; }
+
+    public String getProctoringFlagsJsonb() { return proctoringFlagsJsonb; }
+    public void setProctoringFlagsJsonb(String proctoringFlagsJsonb) { this.proctoringFlagsJsonb = proctoringFlagsJsonb; }
+
+    public OffsetDateTime getCancelledAt() { return cancelledAt; }
+    public void setCancelledAt(OffsetDateTime cancelledAt) { this.cancelledAt = cancelledAt; }
 
     public String getErrorCode() { return errorCode; }
     public void setErrorCode(String errorCode) { this.errorCode = errorCode; }

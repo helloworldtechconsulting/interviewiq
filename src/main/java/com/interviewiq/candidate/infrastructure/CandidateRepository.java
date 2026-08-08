@@ -30,4 +30,6 @@ public interface CandidateRepository extends JpaRepository<Candidate, UUID> {
      * Safe to include IN_PROGRESS because fixedDelay prevents concurrent scheduler runs.
      */
     List<Candidate> findAllByResumeExtractionStatusInAndResumeS3KeyIsNotNull(Collection<PipelineStatus> statuses);
+
+    Optional<Candidate> findByGoogleSubject(String googleSubject);
 }

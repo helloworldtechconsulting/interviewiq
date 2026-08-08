@@ -2,6 +2,7 @@
 // OnboardingPage.tsx — Register a new company + admin account
 // =============================================================================
 
+import { useState, type FormEvent } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -10,8 +11,11 @@ import { useNavigate, Link } from "react-router-dom";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 
+import { companiesApi } from "@/api/modules/companies";
 import { authApi } from "@/api/modules/auth";
+import { authStore } from "@/stores/authStore";
 import { AppError } from "@/api/client";
+import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -31,7 +35,7 @@ const schema = z
     companyName: z
       .string()
       .min(2, "Company name must be at least 2 characters"),
-    fullName: z.string().min(2, "Full name must be at least 2 characters"),
+    adminName: z.string().min(2, "Full name must be at least 2 characters"),
     email: z.string().email("Invalid email address"),
     password: z
       .string()
@@ -52,6 +56,9 @@ type FormData = z.infer<typeof schema>;
 export function OnboardingPage() {
   const navigate = useNavigate();
 
+  const [googleIdToken, setGoogleIdToken] = useState<string | null>(null);
+  const [googleCompanyName, setGoogleCompanyName] = useState("");
+
   const {
     register,
     handleSubmit,
@@ -60,17 +67,29 @@ export function OnboardingPage() {
   } = useForm<FormData>({ resolver: zodResolver(schema) });
 
   const mutation = useMutation({
-    mutationFn: authApi.register,
-    onSuccess(_, variables) {
-      toast.success("Account created! Please check your email for the verification code.");
-      navigate("/verify-email", { replace: true, state: { email: variables.email } });
+    mutationFn: (data: FormData) =>
+      companiesApi.onboard({
+        companyName: data.companyName,
+        adminName: data.adminName,
+        email: data.email,
+        password: data.password,
+      }),
+    onSuccess(result) {
+      toast.success(
+        "Account created! Please check your email for the verification code.",
+      );
+      navigate("/verify-email", {
+        replace: true,
+        state: { email: result.email, slug: result.slug },
+      });
     },
     onError(error) {
       if (error instanceof AppError) {
-        // Map backend field errors to RHF fields
         if (error.fieldErrors) {
           Object.entries(error.fieldErrors).forEach(([field, message]) => {
-            setError(field as keyof FormData, { message });
+            const formField =
+              field === "adminName" ? "adminName" : (field as keyof FormData);
+            setError(formField, { message: message as string });
           });
         } else {
           toast.error(error.message);
@@ -81,13 +100,89 @@ export function OnboardingPage() {
     },
   });
 
+  const googleRegisterMutation = useMutation({
+    mutationFn: ({ idToken, companyName }: { idToken: string; companyName: string }) =>
+      authApi.googleRegister(idToken, companyName),
+    onSuccess(data) {
+      authStore.getState().setTokens(data.accessToken, data.refreshToken);
+      toast.success("Account created! Welcome to InterviewIQ.");
+      navigate("/app/dashboard", { replace: true });
+    },
+    onError(error) {
+      if (error instanceof AppError) {
+        toast.error(error.message);
+      } else {
+        toast.error("Google registration failed. Please try again.");
+      }
+      setGoogleIdToken(null);
+      setGoogleCompanyName("");
+    },
+  });
+
   function onSubmit(data: FormData) {
-    mutation.mutate({
-      companyName: data.companyName,
-      fullName: data.fullName,
-      email: data.email,
-      password: data.password,
+    mutation.mutate(data);
+  }
+
+  function handleGoogleCredential(idToken: string) {
+    setGoogleIdToken(idToken);
+  }
+
+  function submitGoogleRegister(e: FormEvent) {
+    e.preventDefault();
+    if (!googleIdToken || !googleCompanyName.trim()) return;
+    googleRegisterMutation.mutate({
+      idToken: googleIdToken,
+      companyName: googleCompanyName.trim(),
     });
+  }
+
+  const isLoading = mutation.isPending || googleRegisterMutation.isPending;
+
+  if (googleIdToken) {
+    return (
+      <Card className="w-full max-w-md">
+        <CardHeader className="text-center">
+          <CardTitle className="text-2xl">One more thing</CardTitle>
+          <CardDescription>
+            What&apos;s your company name?
+          </CardDescription>
+        </CardHeader>
+        <form onSubmit={submitGoogleRegister}>
+          <CardContent className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="googleCompanyName">Company name</Label>
+              <Input
+                id="googleCompanyName"
+                placeholder="Acme Corp"
+                autoComplete="organization"
+                autoFocus
+                value={googleCompanyName}
+                onChange={(e) => setGoogleCompanyName(e.target.value)}
+              />
+            </div>
+          </CardContent>
+          <CardFooter className="flex flex-col gap-3">
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={!googleCompanyName.trim() || isLoading}
+            >
+              {googleRegisterMutation.isPending && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
+              Create account
+            </Button>
+            <button
+              type="button"
+              className="text-sm text-muted-foreground underline-offset-4 hover:underline"
+              onClick={() => { setGoogleIdToken(null); setGoogleCompanyName(""); }}
+            >
+              Back
+            </button>
+          </CardFooter>
+        </form>
+      </Card>
+    );
   }
 
   return (
@@ -99,8 +194,32 @@ export function OnboardingPage() {
         </CardDescription>
       </CardHeader>
 
+      <CardContent className="pb-0">
+        {/* Google sign-up */}
+        <div className="mb-4">
+          <GoogleSignInButton
+            text="signup_with"
+            onSuccess={handleGoogleCredential}
+            onError={() => toast.error("Google sign-up failed. Please try again.")}
+            disabled={isLoading}
+          />
+        </div>
+
+        {/* Divider */}
+        <div className="relative mb-4">
+          <div className="absolute inset-0 flex items-center">
+            <span className="w-full border-t" />
+          </div>
+          <div className="relative flex justify-center text-xs uppercase">
+            <span className="bg-background px-2 text-muted-foreground">
+              or register with email
+            </span>
+          </div>
+        </div>
+      </CardContent>
+
       <form onSubmit={handleSubmit(onSubmit)} noValidate>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-4 pt-0">
           {/* Company name */}
           <div className="space-y-1.5">
             <Label htmlFor="companyName">Company name</Label>
@@ -119,16 +238,16 @@ export function OnboardingPage() {
 
           {/* Full name */}
           <div className="space-y-1.5">
-            <Label htmlFor="fullName">Your full name</Label>
+            <Label htmlFor="adminName">Your full name</Label>
             <Input
-              id="fullName"
+              id="adminName"
               placeholder="Ravi Kumar"
               autoComplete="name"
-              {...register("fullName")}
+              {...register("adminName")}
             />
-            {errors.fullName && (
+            {errors.adminName && (
               <p className="text-xs text-destructive">
-                {errors.fullName.message}
+                {errors.adminName.message}
               </p>
             )}
           </div>
@@ -187,7 +306,7 @@ export function OnboardingPage() {
           <Button
             type="submit"
             className="w-full"
-            disabled={mutation.isPending}
+            disabled={isLoading}
           >
             {mutation.isPending && (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />

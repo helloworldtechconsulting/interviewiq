@@ -33,6 +33,13 @@ spring:
     locations:
       - classpath:db/migration
       - classpath:db/seed
+    # LOCAL DEV ONLY: drop + re-migrate when a migration checksum changes.
+    # This means editing a migration file (e.g. to fix a column type)
+    # automatically rebuilds the local schema rather than requiring a manual
+    # `flyway repair` + `psql ALTER` cycle.
+    # NEVER set this to true in staging or prod — it destroys all data.
+    clean-on-validation-error: true
+    clean-disabled: false
 
   # ── Spring AI — stub key; no real OpenAI calls in local smoke test ─────────
   #   Replace with a real key when testing the AI pipeline locally.
@@ -51,6 +58,8 @@ spring:
 # Logging — more verbose in local to aid migration and startup debugging
 # =============================================================================
 logging:
+  file:
+    name: C:/Users/Nural/Claude-Project/backend-current.log
   level:
     com.interviewiq:               DEBUG
     org.flywaydb:                  DEBUG
@@ -77,11 +86,6 @@ app:
   razorpay:
     key-id:     rzp_test_local_stub
     key-secret: local_stub_secret
-
-  # Recall.ai — stub; no bot dispatch in local smoke tests
-  recall:
-    api-key:    recall_local_stub_key
-    webhook-secret: recall_local_webhook_secret
 
   # AWS — stub endpoint to prevent real S3/SES calls locally
   aws:

@@ -2,6 +2,8 @@ package com.interviewiq.job.domain;
 
 import com.interviewiq.shared.domain.PipelineStatus;
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.UUID;
@@ -68,6 +70,19 @@ public class JobOpening {
     @Column(nullable = false, length = 50)
     private PipelineStatus jdExtractionStatus = PipelineStatus.PENDING;
 
+    @Column(columnDefinition = "TEXT")
+    private String description;
+
+    @Column(name = "experience_min")
+    private Integer experienceMin;
+
+    @Column(name = "experience_max")
+    private Integer experienceMax;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "questions_jsonb", columnDefinition = "jsonb")
+    private String questionsJsonb;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 50)
     private JobStatus status = JobStatus.ACTIVE;
@@ -121,6 +136,18 @@ public class JobOpening {
 
     public PipelineStatus getJdExtractionStatus() { return jdExtractionStatus; }
     public void setJdExtractionStatus(PipelineStatus jdExtractionStatus) { this.jdExtractionStatus = jdExtractionStatus; }
+
+    public String getDescription() { return description; }
+    public void setDescription(String description) { this.description = description; }
+
+    public Integer getExperienceMin() { return experienceMin; }
+    public void setExperienceMin(Integer experienceMin) { this.experienceMin = experienceMin; }
+
+    public Integer getExperienceMax() { return experienceMax; }
+    public void setExperienceMax(Integer experienceMax) { this.experienceMax = experienceMax; }
+
+    public String getQuestionsJsonb() { return questionsJsonb; }
+    public void setQuestionsJsonb(String questionsJsonb) { this.questionsJsonb = questionsJsonb; }
 
     public JobStatus getStatus() { return status; }
     public void setStatus(JobStatus status) { this.status = status; }

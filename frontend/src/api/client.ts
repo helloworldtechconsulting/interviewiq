@@ -70,6 +70,7 @@ export class AppError extends Error {
     public readonly code: string,
     message: string,
     public readonly fieldErrors?: Record<string, string>,
+    public readonly retryAfterSeconds?: number,
   ) {
     super(message);
     this.name = "AppError";
@@ -99,11 +100,18 @@ function toAppError(error: unknown): AppError {
         ? Object.fromEntries(raw.fieldErrors.map((fe) => [fe.field, fe.message]))
         : undefined;
 
+    const retryAfterHeader = error.response.headers?.["retry-after"];
+    const retryAfterSeconds =
+      error.response.status === 429 && retryAfterHeader
+        ? parseInt(retryAfterHeader, 10) || undefined
+        : undefined;
+
     return new AppError(
       error.response.status,
       raw.errorCode ?? "API_ERROR",
       raw.message ?? error.message,
       fieldErrors,
+      retryAfterSeconds,
     );
   }
 
