@@ -96,17 +96,9 @@ public class AuthController {
         return ApiResponse.ok(authService.login(slug, request, clientIp));
     }
 
-    // ── Private helper ────────────────────────────────────────────────────────
-
-    /**
-     * Resolves the actual client IP, preferring the first value of
-     * {@code X-Forwarded-For} (set by AWS ALB / CloudFront) over the
-     * raw remote address.
-     */
     private static String resolveClientIp(HttpServletRequest request) {
         String xff = request.getHeader("X-Forwarded-For");
         if (xff != null && !xff.isBlank()) {
-            // X-Forwarded-For may contain a comma-separated list; take the first
             return xff.split(",")[0].strip();
         }
         return request.getRemoteAddr();

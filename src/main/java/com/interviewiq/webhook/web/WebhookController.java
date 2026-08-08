@@ -8,13 +8,6 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/**
- * Inbound webhook receiver.
- *
- * <p>Recall.ai webhook endpoint ({@code POST /api/v1/webhooks/recall}) was removed
- * in V038. Session lifecycle events are now driven by the browser directly via
- * {@code /api/v1/candidate/interview/*} REST endpoints.
- */
 @RestController
 @RequestMapping("/api/v1/webhooks")
 public class WebhookController {

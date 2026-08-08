@@ -1,18 +1,3 @@
-# =============================================================================
-# envs/prod/main.tf
-#
-# Production environment — wires all modules together.
-#
-# Production-specific settings:
-#   - Multi-AZ RDS with read replica option
-#   - 3 AZs, HA NAT Gateways (one per AZ)
-#   - Min 2 ECS tasks (one per AZ)
-#   - HTTPS with ACM cert (provisioned here, DNS-validated)
-#   - CloudFront CDN + WAF + SES (fully automated)
-#   - Deletion protection everywhere
-#   - Enhanced monitoring + Performance Insights
-# =============================================================================
-
 locals {
   env     = "prod"
   project = "interviewiq"
@@ -44,21 +29,16 @@ terraform {
   }
 }
 
-# Primary provider — ap-south-1 (Mumbai)
 provider "aws" {
   region = var.region
   default_tags { tags = local.common_tags }
 }
 
-# Alias provider — us-east-1 required for CloudFront ACM certificates.
-# AWS enforces that CloudFront certs must be provisioned in us-east-1 globally.
 provider "aws" {
   alias  = "us_east_1"
   region = "us-east-1"
   default_tags { tags = local.common_tags }
 }
-
-# ── Variables ─────────────────────────────────────────────────────────────────
 
 variable "region"              { type = string; default = "ap-south-1" }
 variable "domain"              { type = string; default = "interviewiq.ai" }
@@ -73,8 +53,6 @@ variable "openai_api_key"      { type = string; sensitive = true }
 variable "razorpay_key_id"     { type = string; sensitive = true }
 variable "razorpay_key_secret" { type = string; sensitive = true }
 
-# ── Data Sources ──────────────────────────────────────────────────────────────
-
 data "aws_caller_identity" "current" {}
 
 data "aws_route53_zone" "main" {
@@ -82,9 +60,6 @@ data "aws_route53_zone" "main" {
   private_zone = false
 }
 
-# ── KMS Keys ──────────────────────────────────────────────────────────────────
-
-# Separate KMS key for CloudWatch logs (independent rotation from secrets/S3)
 resource "aws_kms_key" "cloudwatch" {
   description             = "KMS for ${local.project} ${local.env} CloudWatch logs"
   deletion_window_in_days = 30
@@ -97,7 +72,6 @@ resource "aws_kms_alias" "cloudwatch" {
   target_key_id = aws_kms_key.cloudwatch.key_id
 }
 
-# KMS key for ECR image encryption
 resource "aws_kms_key" "ecr" {
   description             = "KMS for ${local.project} ${local.env} ECR"
   deletion_window_in_days = 30
@@ -109,11 +83,6 @@ resource "aws_kms_alias" "ecr" {
   name          = "alias/${local.project}-${local.env}-ecr"
   target_key_id = aws_kms_key.ecr.key_id
 }
-
-# ── ACM Certificate — ALB (ap-south-1) ───────────────────────────────────────
-# Provisioned as a resource (not data source) so this environment is fully
-# self-contained and reproducible from scratch with a single `terraform apply`.
-# DNS validation records are written to Route53 automatically.
 
 resource "aws_acm_certificate" "alb" {
   domain_name               = "*.${local.domain}"
@@ -149,8 +118,6 @@ resource "aws_acm_certificate_validation" "alb" {
   validation_record_fqdns = [for record in aws_route53_record.alb_cert_validation : record.fqdn]
 }
 
-# ── Modules ───────────────────────────────────────────────────────────────────
-
 module "vpc" {
   source = "../../modules/vpc"
 
@@ -158,8 +125,8 @@ module "vpc" {
   env                = local.env
   region             = local.region
   vpc_cidr           = var.vpc_cidr
-  az_count           = 3      # 3 AZs for HA
-  single_nat_gateway = false  # One NAT per AZ — no single point of failure
+  az_count           = 3
+  single_nat_gateway = false
   kms_key_arn        = aws_kms_key.cloudwatch.arn
   tags               = local.common_tags
 }
@@ -246,9 +213,9 @@ module "rds" {
   db_password           = var.db_password
   allocated_storage     = 50
   max_allocated_storage = 500
-  multi_az              = true   # Automatic failover across AZs
+  multi_az              = true
   backup_retention_days = 30
-  create_read_replica   = false  # Enable when read-heavy analytics queries arise
+  create_read_replica   = false
   tags                  = local.common_tags
 }
 
@@ -268,8 +235,6 @@ module "ecs" {
   ecr_repository_url      = module.ecr.backend_repository_url
   image_tag               = var.image_tag
 
-  # Prod sizing: 1 vCPU / 2 GB RAM per task
-  # Java 21 virtual threads + Spring AI — 2 GB comfortable for 50 concurrent interviews
   task_cpu    = 1024
   task_memory = 2048
 
@@ -282,7 +247,7 @@ module "ecs" {
   db_username        = "interviewiq"
   s3_bucket_name     = module.s3.bucket_name
   domain             = local.domain
-  session_cost_paise = 10000  # ₹100 per interview. NEVER set below 10000 in prod.
+  session_cost_paise = 10000
 
   db_password_secret_arn = module.secrets.db_password_arn
   jwt_keys_secret_arn    = module.secrets.jwt_keys_arn
@@ -317,7 +282,7 @@ module "ses" {
   domain          = local.domain
   route53_zone_id = data.aws_route53_zone.main.zone_id
   alert_topic_arn = module.cloudwatch.alert_topic_arn
-  dmarc_policy    = "reject"  # Strictest policy — graduated from quarantine after validation
+  dmarc_policy    = "reject"
   tags            = local.common_tags
 }
 
@@ -329,7 +294,7 @@ module "waf" {
   region                           = local.region
   alb_arn                          = module.alb.alb_arn
   alert_topic_arn                  = module.cloudwatch.alert_topic_arn
-  blocked_requests_alarm_threshold = 200  # Tighter threshold in prod — alert sooner
+  blocked_requests_alarm_threshold = 200
   tags                             = local.common_tags
 }
 
@@ -350,10 +315,6 @@ module "cloudfront" {
   tags            = local.common_tags
 }
 
-# ── DNS: API subdomain → ALB ──────────────────────────────────────────────────
-# CloudFront manages apex + www records (interviewiq.ai, www.interviewiq.ai).
-# This record covers api.interviewiq.ai → ALB directly (bypasses CDN).
-
 resource "aws_route53_record" "api" {
   zone_id = data.aws_route53_zone.main.zone_id
   name    = "api.${local.domain}"
@@ -365,8 +326,6 @@ resource "aws_route53_record" "api" {
     evaluate_target_health = true
   }
 }
-
-# ── Outputs ───────────────────────────────────────────────────────────────────
 
 output "alb_dns_name"      { value = module.alb.alb_dns_name }
 output "api_url"           { value = "https://api.${local.domain}" }

@@ -69,18 +69,9 @@ public class WalletTransaction {
     @Column(length = 255, unique = true)
     private String razorpayOrderId;
 
-    /**
-     * Razorpay payment ID. Assigned by Razorpay after capture; arrives in the
-     * payment.captured webhook. Distinct from razorpayOrderId (created upfront).
-     * Required for refund API calls and payment reconciliation. Added V031.
-     */
     @Column(name = "razorpay_payment_id", length = 255, unique = true)
     private String razorpayPaymentId;
 
-    /**
-     * Human-readable transaction description shown in the billing history UI.
-     * Examples: "Wallet top-up", "Interview session reservation". Added V031.
-     */
     @Column(length = 500)
     private String description;
 

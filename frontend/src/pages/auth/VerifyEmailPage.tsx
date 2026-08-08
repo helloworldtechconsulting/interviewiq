@@ -47,10 +47,6 @@ export function VerifyEmailPage() {
   const location = useLocation();
   const user = useAuthUser();
 
-  // `email` and `slug` may be passed via router state:
-  //   • from OnboardingPage after a new company is created  → { email, slug }
-  //   • from LoginPage after a 403 email-not-verified redirect → { email }
-  // `slug` must match the company — fall back to the deployment env-var default.
   const state = location.state as { email?: string; slug?: string } | null;
   const email = state?.email ?? user?.email ?? "";
   const slug = state?.slug; // undefined → authApi falls back to VITE_COMPANY_SLUG

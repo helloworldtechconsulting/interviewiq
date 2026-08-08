@@ -1,37 +1,8 @@
 // =============================================================================
-// CandidateRoomPage.tsx — In-browser AI Interview Room (PRD v3)
 //
-// URL: /interview?token=<invite-jwt>
 //
-// Auth: invite token read from URL ?token= and injected into every
-//       candidateClient request via the Axios interceptor.
 //
-// === How the interview works ===
 //
-// 1. SETUP phase — camera/mic permission check + question prefetch
-// 2. READY phase — "Begin interview" screen, camera preview visible
-// 3. INTERVIEW phase — one question at a time:
-//      a. SpeechSynthesis reads the question aloud (AI voice)
-//      b. SpeechRecognition listens and accumulates the candidate's answer
-//      c. Candidate can also type/edit the transcript manually
-//      d. "Next" advances to the next question
-// 4. UPLOADING phase — MediaRecorder blob is PUT to S3 via pre-signed URL
-// 5. SUBMITTED phase — evaluation in progress spinner
-// 6. COMPLETED phase — thank-you screen
-//
-// === Anti-cheat proctoring ===
-//   - Tab-switch events are detected via visibilitychange + blur
-//   - Camera stream is checked: if no video tracks are active the interview
-//     pauses with a warning
-//   - Proctoring flags are submitted as part of the complete payload
-//
-// === Browser API requirements ===
-//   - getUserMedia (camera + microphone)
-//   - SpeechSynthesis (text-to-speech)
-//   - SpeechRecognition (speech-to-text) — webkitSpeechRecognition in Chrome/Edge
-//   - MediaRecorder (video recording)
-//
-// Unsupported browsers show a compatibility error.
 // =============================================================================
 
 import {
@@ -69,8 +40,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { cn, formatDateTime } from "@/lib/utils";
 import type { InterviewQuestion } from "@/types";
 
-// ── Browser capability check ───────────────────────────────────────────────────
-
 declare global {
   interface Window {
     SpeechRecognition: typeof SpeechRecognition;
@@ -86,8 +55,6 @@ function checkBrowserSupport(): string | null {
   if (!window.MediaRecorder) return "Video recording is not supported in this browser.";
   return null; // all good
 }
-
-// ── State machine ──────────────────────────────────────────────────────────────
 
 type RoomPhase =
   | "CHECKING"      // initial load: checking browser support + fetching init data
@@ -204,8 +171,6 @@ const initialState: RoomState = {
   cameraActive: false,
 };
 
-// ── Countdown timer hook ───────────────────────────────────────────────────────
-
 function useCountdown(targetIso: string | null | undefined) {
   const [diff, setDiff] = useState(0);
   useEffect(() => {
@@ -227,8 +192,6 @@ function useCountdown(targetIso: string | null | undefined) {
   };
 }
 
-// ── Progress bar ───────────────────────────────────────────────────────────────
-
 function ProgressBar({ current, total }: { current: number; total: number }) {
   const pct = total > 0 ? Math.round((current / total) * 100) : 0;
   return (
@@ -246,8 +209,6 @@ function ProgressBar({ current, total }: { current: number; total: number }) {
     </div>
   );
 }
-
-// ── Error / status screens ─────────────────────────────────────────────────────
 
 function ErrorScreen({ title, description }: { title: string; description: string }) {
   return (
@@ -317,8 +278,6 @@ function CompletedScreen() {
   );
 }
 
-// ── Camera preview component ───────────────────────────────────────────────────
-
 function CameraPreview({
   stream,
   active,
@@ -362,8 +321,6 @@ function CameraPreview({
   );
 }
 
-// ── Main Component ─────────────────────────────────────────────────────────────
-
 export function CandidateRoomPage() {
   const [searchParams] = useSearchParams();
   const token = searchParams.get("token");
@@ -373,19 +330,15 @@ export function CandidateRoomPage() {
     phase: token ? "CHECKING" : "INVALID_TOKEN",
   });
 
-  // Refs for media objects (not in state — no re-render needed)
   const streamRef = useRef<MediaStream | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const recognitionRef = useRef<InstanceType<typeof SpeechRecognition> | null>(null);
   const synthRef = useRef(window.speechSynthesis);
 
-  // Data fetched from init endpoint
   const [questions, setQuestions] = useState<InterviewQuestion[]>([]);
   const [recordingKey, setRecordingKey] = useState<string | null>(null);
   const [recordingUploadUrl, setRecordingUploadUrl] = useState<string | null>(null);
-
-  // ── Init query — fetches questions + recording URL ───────────────────────────
 
   const { data: initData, refetch: refetchInit } = useQuery({
     queryKey: ["candidate", "interview", "init"],
@@ -394,12 +347,9 @@ export function CandidateRoomPage() {
     refetchInterval: false,
   });
 
-  // ── Start mutation ───────────────────────────────────────────────────────────
-
   const startMutation = useMutation({
     mutationFn: candidateRoomApi.startInterview,
     onSuccess: () => {
-      // Session is now STARTED — begin TTS for first question
       dispatch({ type: "SET_PHASE", phase: "SPEAKING" });
       speakQuestion(0);
     },
@@ -407,8 +357,6 @@ export function CandidateRoomPage() {
       toast.error("Failed to start interview. Please try again.");
     },
   });
-
-  // ── Complete mutation ────────────────────────────────────────────────────────
 
   const completeMutation = useMutation({
     mutationFn: candidateRoomApi.completeInterview,
@@ -419,12 +367,9 @@ export function CandidateRoomPage() {
     },
   });
 
-  // ── Google identity verify mutation ─────────────────────────────────────────
-
   const googleVerifyMutation = useMutation({
     mutationFn: (idToken: string) => candidateRoomApi.googleVerify(idToken),
     onSuccess: () => {
-      // Google identity confirmed — proceed to camera/mic setup
       dispatch({ type: "SET_PHASE", phase: "SETUP" });
     },
     onError: () => {
@@ -432,12 +377,9 @@ export function CandidateRoomPage() {
     },
   });
 
-  // ── Browser compatibility + init data processing ──────────────────────────
-
   useEffect(() => {
     if (!token) return;
 
-    // Check browser APIs
     const incompatible = checkBrowserSupport();
     if (incompatible) {
       dispatch({ type: "INCOMPATIBLE", reason: incompatible });
@@ -446,7 +388,6 @@ export function CandidateRoomPage() {
 
     if (!initData) return;
 
-    // Handle existing terminal session states
     if (initData.status === "COMPLETED") {
       dispatch({ type: "SET_PHASE", phase: "COMPLETED" });
       return;
@@ -460,18 +401,15 @@ export function CandidateRoomPage() {
       return;
     }
 
-    // Questions not ready yet?
     if (
       initData.questionGenerationStatus !== "DONE" ||
       !initData.questionsJson
     ) {
       dispatch({ type: "SET_PHASE", phase: "WAITING" });
-      // Poll again after 5 seconds
       const timer = setTimeout(() => refetchInit(), 5000);
       return () => clearTimeout(timer);
     }
 
-    // Parse questions
     try {
       const parsed: InterviewQuestion[] = JSON.parse(initData.questionsJson);
       parsed.sort((a, b) => a.order - b.order);
@@ -483,7 +421,6 @@ export function CandidateRoomPage() {
       return;
     }
 
-    // If session is already STARTED (browser refresh mid-interview), jump to interview
     if (initData.status === "STARTED") {
       requestCameraAndMic().then((ok) => {
         if (ok) {
@@ -492,19 +429,14 @@ export function CandidateRoomPage() {
         }
       });
     } else {
-      // INVITED — check Google identity requirement before camera setup
       if (initData.googleVerified === false) {
-        // Candidate needs to verify their Google identity first
         dispatch({ type: "SET_PHASE", phase: "GOOGLE_AUTH" });
       } else {
-        // Google already verified (or not required) — proceed to camera setup
         dispatch({ type: "SET_PHASE", phase: "SETUP" });
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initData, token]);
-
-  // ── Tab-switch anti-cheat ─────────────────────────────────────────────────
 
   useEffect(() => {
     if (!["SPEAKING", "LISTENING", "REVIEWING"].includes(state.phase)) return;
@@ -527,8 +459,6 @@ export function CandidateRoomPage() {
     };
   }, [state.phase]);
 
-  // ── Camera/mic access ─────────────────────────────────────────────────────
-
   const requestCameraAndMic = useCallback(async (): Promise<boolean> => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -538,7 +468,6 @@ export function CandidateRoomPage() {
       streamRef.current = stream;
       dispatch({ type: "SET_CAMERA", active: true });
 
-      // Start MediaRecorder
       const recorder = new MediaRecorder(stream, {
         mimeType: MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")
           ? "video/webm;codecs=vp9,opus"
@@ -550,7 +479,6 @@ export function CandidateRoomPage() {
       recorder.start(5000); // collect chunks every 5s
       mediaRecorderRef.current = recorder;
 
-      // Monitor camera track — flag if candidate kills camera mid-interview
       stream.getVideoTracks().forEach((track) => {
         track.onended = () => {
           dispatch({ type: "SET_CAMERA", active: false });
@@ -578,8 +506,6 @@ export function CandidateRoomPage() {
     }
   }, [requestCameraAndMic]);
 
-  // ── Text-to-speech ────────────────────────────────────────────────────────
-
   const speakQuestion = useCallback((index: number) => {
     if (index >= questions.length) return;
     const synth = synthRef.current;
@@ -594,20 +520,16 @@ export function CandidateRoomPage() {
 
     utterance.onend = () => {
       dispatch({ type: "SET_SPEAKING", value: false });
-      // Auto-start STT after TTS finishes
       startListening();
     };
 
     utterance.onerror = () => {
       dispatch({ type: "SET_SPEAKING", value: false });
-      // Even on TTS error, let candidate answer
       startListening();
     };
 
     synth.speak(utterance);
   }, [questions]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── Speech-to-text ────────────────────────────────────────────────────────
 
   const startListening = useCallback(() => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -641,7 +563,6 @@ export function CandidateRoomPage() {
 
     recognition.onend = () => {
       dispatch({ type: "SET_LISTENING", value: false });
-      // Move to REVIEWING so candidate can see/edit transcript
       dispatch({ type: "SET_PHASE", phase: "REVIEWING" });
     };
 
@@ -661,8 +582,6 @@ export function CandidateRoomPage() {
     recognitionRef.current?.stop();
   }, []);
 
-  // ── Question navigation ───────────────────────────────────────────────────
-
   const handleNextQuestion = useCallback(async () => {
     recognitionRef.current?.abort();
     synthRef.current.cancel();
@@ -673,25 +592,20 @@ export function CandidateRoomPage() {
     dispatch({ type: "NEXT_QUESTION", transcript: currentTranscript });
 
     if (nextIndex >= questions.length) {
-      // All questions answered — upload recording then complete
       await handleFinishInterview([
         ...state.answers,
         { questionOrder: state.currentQuestionIndex + 1, transcript: currentTranscript },
       ]);
     } else {
-      // Next question
       dispatch({ type: "SET_PHASE", phase: "SPEAKING" });
       speakQuestion(nextIndex);
     }
   }, [state.currentTranscript, state.currentQuestionIndex, state.answers, questions.length, speakQuestion]); // eslint-disable-line
 
-  // ── Finish interview ──────────────────────────────────────────────────────
-
   const handleFinishInterview = useCallback(
     async (finalAnswers: QuestionAnswer[]) => {
       dispatch({ type: "SET_PHASE", phase: "UPLOADING" });
 
-      // Stop MediaRecorder and collect final blob
       let s3KeyToSubmit: string | null = null;
 
       if (mediaRecorderRef.current?.state !== "inactive") {
@@ -703,7 +617,6 @@ export function CandidateRoomPage() {
         });
       }
 
-      // Upload video to S3 if we have chunks
       if (chunksRef.current.length > 0 && recordingUploadUrl) {
         const blob = new Blob(chunksRef.current, { type: "video/webm" });
         const uploaded = await candidateRoomApi.uploadRecording(recordingUploadUrl, blob);
@@ -716,10 +629,8 @@ export function CandidateRoomPage() {
         }
       }
 
-      // Stop camera stream
       streamRef.current?.getTracks().forEach((t) => t.stop());
 
-      // Build proctoring flags
       const proctoringFlags: ProctoringFlagPayload[] = [];
       const { tabSwitchCount, firstTabSwitch, cameraLostCount, firstCameraLost } =
         state.proctoring;
@@ -748,13 +659,9 @@ export function CandidateRoomPage() {
     [recordingUploadUrl, recordingKey, state.proctoring, completeMutation],
   );
 
-  // ── Begin interview (READY → SPEAKING) ───────────────────────────────────
-
   const handleBeginInterview = useCallback(() => {
     startMutation.mutate();
   }, [startMutation]);
-
-  // ── Render ────────────────────────────────────────────────────────────────
 
   if (state.phase === "INVALID_TOKEN") {
     return (
@@ -820,8 +727,6 @@ export function CandidateRoomPage() {
     return <CompletedScreen />;
   }
 
-  // ── GOOGLE_AUTH — candidate must verify Google identity ────────────────────
-
   if (state.phase === "GOOGLE_AUTH") {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-8 p-8 text-center">
@@ -851,8 +756,6 @@ export function CandidateRoomPage() {
       </div>
     );
   }
-
-  // ── SETUP — camera permission request ──────────────────────────────────────
 
   if (state.phase === "SETUP") {
     return (
@@ -884,8 +787,6 @@ export function CandidateRoomPage() {
     );
   }
 
-  // ── READY — camera preview, begin button ──────────────────────────────────
-
   if (state.phase === "READY") {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-8 p-8">
@@ -916,8 +817,6 @@ export function CandidateRoomPage() {
     );
   }
 
-  // ── UPLOADING ─────────────────────────────────────────────────────────────
-
   if (state.phase === "UPLOADING") {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-6 p-8 text-center">
@@ -929,8 +828,6 @@ export function CandidateRoomPage() {
       </div>
     );
   }
-
-  // ── INTERVIEW PHASES: SPEAKING / LISTENING / REVIEWING ────────────────────
 
   const currentQ = questions[state.currentQuestionIndex];
   const isLastQuestion = state.currentQuestionIndex === questions.length - 1;

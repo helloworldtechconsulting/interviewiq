@@ -1,15 +1,3 @@
-# =============================================================================
-# modules/cloudwatch/main.tf
-#
-# Observability stack for InterviewIQ:
-#   - Application alarms (ECS CPU, memory, task count, ALB 5xx, RDS)
-#   - SNS topic for alert routing → email/PagerDuty/Slack
-#   - Dashboard with key service metrics
-#   - Log metric filters (extract error counts from Spring Boot logs)
-# =============================================================================
-
-# ── SNS Topic for Alerts ──────────────────────────────────────────────────────
-
 resource "aws_sns_topic" "alerts" {
   name              = "${var.project}-${var.env}-alerts"
   kms_master_key_id = var.kms_key_arn
@@ -22,8 +10,6 @@ resource "aws_sns_topic_subscription" "email" {
   protocol  = "email"
   endpoint  = var.alert_emails[count.index]
 }
-
-# ── ECS Alarms ────────────────────────────────────────────────────────────────
 
 resource "aws_cloudwatch_metric_alarm" "ecs_cpu_high" {
   alarm_name          = "${var.project}-${var.env}-ecs-cpu-high"
@@ -67,8 +53,6 @@ resource "aws_cloudwatch_metric_alarm" "ecs_task_count_low" {
   tags = var.tags
 }
 
-# ── ALB Alarms ────────────────────────────────────────────────────────────────
-
 resource "aws_cloudwatch_metric_alarm" "alb_5xx" {
   alarm_name          = "${var.project}-${var.env}-alb-5xx-high"
   comparison_operator = "GreaterThanThreshold"
@@ -97,7 +81,7 @@ resource "aws_cloudwatch_metric_alarm" "alb_latency" {
   namespace           = "AWS/ApplicationELB"
   period              = 60
   statistic           = "p99"
-  threshold           = 3.0 # 3 seconds p99 → Spring AI calls may be slow
+  threshold           = 3.0
   alarm_description   = "ALB p99 latency > 3s — check OpenAI timeouts or slow queries"
   alarm_actions       = [aws_sns_topic.alerts.arn]
 
@@ -107,8 +91,6 @@ resource "aws_cloudwatch_metric_alarm" "alb_latency" {
 
   tags = var.tags
 }
-
-# ── RDS Alarms ────────────────────────────────────────────────────────────────
 
 resource "aws_cloudwatch_metric_alarm" "rds_cpu" {
   alarm_name          = "${var.project}-${var.env}-rds-cpu-high"
@@ -134,7 +116,7 @@ resource "aws_cloudwatch_metric_alarm" "rds_connections" {
   namespace           = "AWS/RDS"
   period              = 60
   statistic           = "Average"
-  threshold           = 150  # HikariPool max is 10 per task × 10 tasks + buffer
+  threshold           = 150
   alarm_description   = "RDS connection count > 150 — consider pgBouncer"
   alarm_actions       = [aws_sns_topic.alerts.arn]
 
@@ -150,15 +132,13 @@ resource "aws_cloudwatch_metric_alarm" "rds_storage_low" {
   namespace           = "AWS/RDS"
   period              = 300
   statistic           = "Average"
-  threshold           = 5368709120 # 5 GB in bytes
+  threshold           = 5368709120
   alarm_description   = "RDS free storage < 5GB — expand storage or enable autoscaling"
   alarm_actions       = [aws_sns_topic.alerts.arn]
 
   dimensions = { DBInstanceIdentifier = var.rds_identifier }
   tags       = var.tags
 }
-
-# ── Log Metric Filters (extract ERROR count from Spring Boot logs) ─────────────
 
 resource "aws_cloudwatch_log_metric_filter" "app_errors" {
   name           = "${var.project}-${var.env}-application-errors"
@@ -187,8 +167,6 @@ resource "aws_cloudwatch_metric_alarm" "app_error_rate" {
   treat_missing_data  = "notBreaching"
   tags                = var.tags
 }
-
-# ── CloudWatch Dashboard ──────────────────────────────────────────────────────
 
 resource "aws_cloudwatch_dashboard" "main" {
   dashboard_name = "${var.project}-${var.env}-overview"

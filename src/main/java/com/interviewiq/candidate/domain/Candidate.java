@@ -61,34 +61,15 @@ public class Candidate {
     @Column(nullable = false, length = 50)
     private PipelineStatus resumeExtractionStatus = PipelineStatus.PENDING;
 
-    /**
-     * Candidate phone number (optional). Added V030.
-     * DB CHECK: phone IS NULL OR length(trim(phone)) > 0.
-     */
     @Column(length = 30)
     private String phone;
 
-    // ── Google identity (V039) ─────────────────────────────────────────────────
-
-    /**
-     * Google account subject ({@code sub} claim) — stable, immutable per Google account.
-     * Null until the candidate completes Google identity verification via
-     * {@code POST /api/v1/candidate/auth/google}.
-     */
     @Column(length = 255)
     private String googleSubject;
 
-    /**
-     * Email address from the verified Google ID token.
-     * May differ from {@link #email} (the invite email).
-     */
     @Column(length = 255)
     private String googleEmail;
 
-    /**
-     * True once {@code CandidateAuthController} has successfully verified
-     * the candidate's Google ID token. Defaults to false.
-     */
     @Column(nullable = false)
     private boolean googleVerified = false;
 

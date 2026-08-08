@@ -8,12 +8,7 @@ import java.util.UUID;
 
 public interface EmailSuppressionRepository extends JpaRepository<EmailSuppression, UUID> {
 
-    /**
-     * Pre-send suppression check. Called on every outbound email dispatch.
-     * Backed by the UNIQUE index on email (V036) — O(log n).
-     */
     boolean existsByEmail(String email);
 
-    /** Load suppression record for a given email — used by SES webhook handler. */
     Optional<EmailSuppression> findByEmail(String email);
 }

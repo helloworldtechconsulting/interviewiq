@@ -1,18 +1,3 @@
-# =============================================================================
-# envs/dev/main.tf
-#
-# Dev environment — cost-optimised, no HA, Fargate Spot, small instances.
-#
-# Cost estimate (ap-south-1, 730 hrs/month):
-#   ECS Fargate Spot 0.5vCPU/1GB : ~$8/month
-#   RDS db.t4g.micro              : ~$13/month
-#   NAT Gateway (1x)              : ~$35/month  ← biggest cost in dev
-#   ALB                           : ~$18/month
-#   TOTAL                         : ~$74/month
-#
-# Tip: stop RDS + ECS nights/weekends with a Lambda scheduler to cut ~60%.
-# =============================================================================
-
 locals {
   env     = "dev"
   project = "interviewiq"
@@ -23,7 +8,7 @@ locals {
     Project     = local.project
     Environment = local.env
     ManagedBy   = "Terraform"
-    AutoShutdown = "true"  # tag for cost-saving Lambda scheduler
+    AutoShutdown = "true"
   }
 }
 
@@ -60,9 +45,9 @@ module "vpc" {
   project            = local.project
   env                = local.env
   region             = local.region
-  vpc_cidr           = "10.1.0.0/16"  # different CIDR per env (VPC peering ready)
+  vpc_cidr           = "10.1.0.0/16"
   az_count           = 2
-  single_nat_gateway = true           # save $35/month — acceptable in dev
+  single_nat_gateway = true
   kms_key_arn        = aws_kms_key.dev.arn
   tags               = local.common_tags
 }
@@ -79,7 +64,7 @@ module "secrets" {
   project             = local.project
   env                 = local.env
   db_password         = var.db_password
-  jwt_private_key_pem = ""   # empty = ephemeral keys in dev (fine for testing)
+  jwt_private_key_pem = ""
   jwt_public_key_pem  = ""
   invite_secret       = var.invite_secret
   openai_api_key      = var.openai_api_key
@@ -106,7 +91,7 @@ module "alb" {
   vpc_id                = module.vpc.vpc_id
   vpc_cidr              = module.vpc.vpc_cidr
   public_subnet_ids     = module.vpc.public_subnet_ids
-  create_https_listener = false  # HTTP only in dev
+  create_https_listener = false
   tags                  = local.common_tags
 }
 
@@ -172,7 +157,7 @@ module "ecs" {
   db_username             = "interviewiq"
   s3_bucket_name          = module.s3.bucket_name
   domain                  = local.domain
-  session_cost_paise      = 10000  # ₹100 — same as prod so billing logic is always tested correctly
+  session_cost_paise      = 10000
   db_password_secret_arn  = module.secrets.db_password_arn
   jwt_keys_secret_arn     = module.secrets.jwt_keys_arn
   invite_secret_arn       = module.secrets.invite_secret_arn
@@ -196,8 +181,6 @@ module "cloudwatch" {
   tags               = local.common_tags
 }
 
-# WAF protects the dev ALB from real attack traffic that hits the public endpoint.
-# SES and CloudFront are intentionally skipped in dev (HTTP-only, cost saving).
 module "waf" {
   source = "../../modules/waf"
 
@@ -206,15 +189,11 @@ module "waf" {
   region                          = local.region
   alb_arn                          = module.alb.alb_arn
   alert_topic_arn                  = module.cloudwatch.alert_topic_arn
-  blocked_requests_alarm_threshold = 1000  # Looser in dev — less traffic, more noise tolerance
+  blocked_requests_alarm_threshold = 1000
   tags                             = local.common_tags
 }
 
-# ── Variables ─────────────────────────────────────────────────────────────────
-
 variable "alert_emails" { type = list(string); default = [] }
-
-# ── Outputs ───────────────────────────────────────────────────────────────────
 
 output "alb_dns_name"    { value = module.alb.alb_dns_name }
 output "ecr_backend_url" { value = module.ecr.backend_repository_url }

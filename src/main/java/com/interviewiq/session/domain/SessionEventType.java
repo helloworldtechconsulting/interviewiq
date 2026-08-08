@@ -1,6 +1,5 @@
 package com.interviewiq.session.domain;
 
-/** DB CHECK values for session_events.event_type (V035) */
 public enum SessionEventType {
     SESSION_STARTED,
     SESSION_ENDED,

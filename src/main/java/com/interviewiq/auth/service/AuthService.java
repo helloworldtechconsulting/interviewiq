@@ -172,7 +172,6 @@ public class AuthService {
      */
     @Transactional
     public AuthResponse login(String slug, LoginRequest request, String clientIp) {
-        // Check lockout BEFORE any DB work — blocked IPs never hit the database
         loginAttemptService.checkLockout(clientIp);
 
         Company company = requireCompanyBySlug(slug);
@@ -184,13 +183,10 @@ public class AuthService {
 
         if (user == null || !user.isActive() || user.getPasswordHash() == null ||
                 !passwordEncoder.matches(request.password(), user.getPasswordHash())) {
-            // Record failure for ALL failure cases — prevents enumeration while
-            // still tracking failures from the IP perspective
             loginAttemptService.recordFailure(clientIp);
             throw new AuthorizationException("Invalid credentials.");
         }
 
-        // Successful login — clear any accumulated failures
         loginAttemptService.resetFailures(clientIp);
 
         user.setLastLoginAt(OffsetDateTime.now(ZoneOffset.UTC));

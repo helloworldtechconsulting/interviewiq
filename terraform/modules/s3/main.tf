@@ -1,20 +1,3 @@
-# =============================================================================
-# modules/s3/main.tf
-#
-# S3 bucket for InterviewIQ file storage:
-#   - JD files (jd/)
-#   - Candidate resumes (resume/)
-#   - Interview recordings (recording/)
-#   - Company logos (logo/)
-#
-# Security:
-#   - Encrypted with KMS (CMK)
-#   - No public access
-#   - Pre-signed URLs for time-limited candidate access
-#   - CORS configured for browser-direct uploads
-#   - Lifecycle rules for cost management
-# =============================================================================
-
 resource "aws_kms_key" "s3" {
   description             = "KMS key for ${var.project} ${var.env} S3 bucket"
   deletion_window_in_days = 30
@@ -26,8 +9,6 @@ resource "aws_kms_alias" "s3" {
   name          = "alias/${var.project}-${var.env}-s3"
   target_key_id = aws_kms_key.s3.key_id
 }
-
-# ── Main Storage Bucket ───────────────────────────────────────────────────────
 
 resource "aws_s3_bucket" "main" {
   bucket        = var.bucket_name
@@ -50,7 +31,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "main" {
       sse_algorithm     = "aws:kms"
       kms_master_key_id = aws_kms_key.s3.arn
     }
-    bucket_key_enabled = true # reduces KMS API calls by ~90%
+    bucket_key_enabled = true
   }
 }
 
@@ -61,10 +42,6 @@ resource "aws_s3_bucket_public_access_block" "main" {
   ignore_public_acls      = true
   restrict_public_buckets = true
 }
-
-# ── CORS for browser-direct uploads (pre-signed PUT) ─────────────────────────
-# Spring Boot generates pre-signed URLs; the browser PUTs directly to S3.
-# This avoids routing large video files through the backend.
 
 resource "aws_s3_bucket_cors_configuration" "main" {
   bucket = aws_s3_bucket.main.id
@@ -78,13 +55,9 @@ resource "aws_s3_bucket_cors_configuration" "main" {
   }
 }
 
-# ── Lifecycle Rules ────────────────────────────────────────────────────────────
-# Interview recordings are large (100MB–500MB) — move to cheaper storage tier.
-
 resource "aws_s3_bucket_lifecycle_configuration" "main" {
   bucket = aws_s3_bucket.main.id
 
-  # Recordings: IA after 30 days, Glacier after 90 days, delete after 365 days
   rule {
     id     = "recording-lifecycle"
     status = "Enabled"
@@ -95,14 +68,13 @@ resource "aws_s3_bucket_lifecycle_configuration" "main" {
     }
     transition {
       days          = 90
-      storage_class = "GLACIER_IR" # Instant Retrieval — still fast but much cheaper
+      storage_class = "GLACIER_IR"
     }
     expiration {
       days = 365
     }
   }
 
-  # JD files + resumes: IA after 90 days (accessed less frequently)
   rule {
     id     = "documents-lifecycle"
     status = "Enabled"
@@ -118,7 +90,6 @@ resource "aws_s3_bucket_lifecycle_configuration" "main" {
     }
   }
 
-  # Logos rarely change — IA immediately viable if > 128KB
   rule {
     id     = "logo-lifecycle"
     status = "Enabled"
@@ -129,7 +100,6 @@ resource "aws_s3_bucket_lifecycle_configuration" "main" {
     }
   }
 
-  # Clean up incomplete multipart uploads (browser crash mid-upload)
   rule {
     id     = "cleanup-multipart"
     status = "Enabled"
@@ -139,9 +109,6 @@ resource "aws_s3_bucket_lifecycle_configuration" "main" {
     filter {}
   }
 }
-
-# ── Bucket Policy ─────────────────────────────────────────────────────────────
-# Deny any access not using TLS; deny unencrypted uploads.
 
 resource "aws_s3_bucket_policy" "main" {
   bucket = aws_s3_bucket.main.id

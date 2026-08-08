@@ -20,29 +20,6 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * Stricter per-IP rate limiter applied exclusively to
- * {@code POST /api/v1/companies/register} (the public company-onboarding endpoint).
- *
- * <h2>Why a separate filter?</h2>
- * <p>The general {@link RateLimitFilter} covers all auth endpoints at a moderate
- * rate (20 burst / 10 per minute) to defend against credential stuffing and OTP
- * brute-force. Company creation is a heavier operation and a bigger abuse vector —
- * someone could slowly spin up many free tenants without triggering the general limit.
- *
- * <h2>Default limits</h2>
- * <ul>
- *   <li>Capacity: 3 (max burst — e.g. someone onboarding 3 companies in quick succession)</li>
- *   <li>Refill: 3 tokens every 30 minutes per IP</li>
- * </ul>
- * <p>This means an IP can create at most 3 companies per 30-minute window, which is
- * generous for legitimate use but prevents automated bulk creation.
- *
- * <h2>Pass-through behaviour</h2>
- * <p>All requests that are NOT {@code POST /api/v1/companies/register} pass straight
- * through without consuming any tokens. The filter is path-aware and intentionally
- * narrow in scope.
- */
 public class OnboardRateLimitFilter extends OncePerRequestFilter {
 
     private static final Logger log = LoggerFactory.getLogger(OnboardRateLimitFilter.class);
@@ -55,7 +32,6 @@ public class OnboardRateLimitFilter extends OncePerRequestFilter {
     private final Duration refillDuration;
     private final ObjectMapper objectMapper;
 
-    /** Per-IP token buckets for the onboarding endpoint only. */
     private final ConcurrentHashMap<String, Bucket> buckets = new ConcurrentHashMap<>();
 
     public OnboardRateLimitFilter(int capacity,
@@ -74,7 +50,6 @@ public class OnboardRateLimitFilter extends OncePerRequestFilter {
                                     FilterChain         chain)
             throws ServletException, IOException {
 
-        // Only apply to POST /api/v1/companies/register — all other paths pass through
         if (!ONBOARD_METHOD.equalsIgnoreCase(request.getMethod())
                 || !ONBOARD_PATH.equals(request.getRequestURI())) {
             chain.doFilter(request, response);
@@ -100,10 +75,6 @@ public class OnboardRateLimitFilter extends OncePerRequestFilter {
             response.getWriter().write(objectMapper.writeValueAsString(body));
         }
     }
-
-    // =========================================================================
-    // Private helpers
-    // =========================================================================
 
     private Bucket newBucket(String ip) {
         Bandwidth limit = Bandwidth.classic(

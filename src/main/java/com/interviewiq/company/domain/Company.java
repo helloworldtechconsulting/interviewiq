@@ -46,27 +46,19 @@ public class Company {
     @Column(nullable = false, length = 50)
     private CompanyStatus status = CompanyStatus.ACTIVE;
 
-    /** Company website URL. Added V027. */
     @Column(columnDefinition = "TEXT")
     private String website;
 
-    /** Industry classification (e.g. "Technology", "Finance"). Added V027. */
     @Column(length = 100)
     private String industry;
 
-    /** S3 object key for the company logo. Added V027. */
     @Column(name = "logo_s3_key", length = 512)
     private String logoS3Key;
 
-    /**
-     * Headcount band. Added V027.
-     * Stored as VARCHAR; DB CHECK enforces: STARTUP, SMALL, MEDIUM, LARGE.
-     */
     @Enumerated(EnumType.STRING)
     @Column(length = 50)
     private CompanySize size;
 
-    /** GST registration number for invoicing. Added V027. */
     @Column(name = "gst_number", length = 20)
     private String gstNumber;
 

@@ -1,9 +1,5 @@
 // =============================================================================
 // types/index.ts — All domain types mirroring the InterviewIQ backend API
-//
-// IMPORTANT: All types here match backend JSON responses AFTER the axios
-// interceptor has applied snake_case → camelCase transformation.
-// E.g. backend "job_opening_id" → frontend "jobOpeningId".
 // =============================================================================
 
 // ── Shared / Pagination ───────────────────────────────────────────────────────
@@ -80,10 +76,6 @@ export type SuppressionReason = "BOUNCE" | "COMPLAINT" | "MANUAL";
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
-/**
- * POST /api/v1/companies/register — atomically creates company + admin user + wallet.
- * Matches CompanyOnboardRequest.java fields exactly.
- */
 export interface CompanyOnboardRequest {
   companyName: string;
   slug?: string;        // optional — auto-generated from companyName when omitted
@@ -93,16 +85,11 @@ export interface CompanyOnboardRequest {
   password: string;
 }
 
-/** Response from POST /api/v1/companies/register */
 export interface OnboardResponse {
   slug: string;   // company slug — needed for all subsequent /api/v1/{slug}/auth/* calls
   email: string;
 }
 
-/**
- * POST /api/v1/{slug}/auth/register — adds a new user to an EXISTING company.
- * Only used for team-member self-registration, NOT for onboarding a new company.
- */
 export interface RegisterRequest {
   fullName: string;
   email: string;
@@ -114,7 +101,6 @@ export interface LoginRequest {
   password: string;
 }
 
-/** Mirrors AuthService/UserResponse.java — backend sends snake_case, interceptor converts to camelCase. */
 export interface UserResponse {
   id: string;
   companyId: string;
@@ -168,7 +154,6 @@ export interface JwtPayload {
 
 // ── Company ───────────────────────────────────────────────────────────────────
 
-/** Mirrors CompanyProfileResponse.java */
 export interface Company {
   id: string;
   name: string;
@@ -183,7 +168,6 @@ export interface Company {
   createdAt: string;
 }
 
-/** Mirrors UpdateCompanyRequest.java — all fields optional (null = do not change) */
 export interface UpdateCompanyRequest {
   name?: string;
   domain?: string;      // empty string clears the field
@@ -225,7 +209,6 @@ export interface UpdateMemberRequest {
 
 // ── Job ───────────────────────────────────────────────────────────────────────
 
-/** Mirrors JobResponse.java */
 export interface Job {
   id: string;
   companyId: string;
@@ -244,7 +227,6 @@ export interface Job {
   updatedAt: string;
 }
 
-/** Mirrors CreateJobRequest.java */
 export interface CreateJobRequest {
   title: string;
   department?: string;
@@ -255,7 +237,6 @@ export interface CreateJobRequest {
   experienceMax?: number;
 }
 
-/** Mirrors UpdateJobRequest.java — all fields optional */
 export interface UpdateJobRequest {
   title?: string;
   department?: string;
@@ -274,7 +255,6 @@ export interface JdUploadUrlResponse {
 
 // ── Candidate ─────────────────────────────────────────────────────────────────
 
-/** Mirrors CandidateResponse.java */
 export interface Candidate {
   id: string;
   companyId: string;
@@ -288,7 +268,6 @@ export interface Candidate {
   updatedAt: string;
 }
 
-/** Mirrors CreateCandidateRequest.java */
 export interface CreateCandidateRequest {
   jobOpeningId: string;
   email: string;
@@ -308,7 +287,6 @@ export interface ResumeUploadUrlResponse {
 
 // ── Session ───────────────────────────────────────────────────────────────────
 
-/** Mirrors SessionResponse.java */
 export interface Session {
   id: string;
   companyId: string;
@@ -322,7 +300,6 @@ export interface Session {
   endedAt: string | null;
   durationSeconds: number | null;
   recordingS3Key: string | null;
-  /** JSON array string — parse client-side when displaying proctoring flags */
   proctoringFlagsJsonb: string | null;
   cancelledAt: string | null;
   errorCode: string | null;
@@ -330,29 +307,18 @@ export interface Session {
   updatedAt: string;
 }
 
-/**
- * Mirrors InterviewInitResponse.java — returned by
- * GET /api/v1/candidate/interview/init
- */
 export interface InterviewInitData {
   sessionId: string;
   status: SessionStatus;
   questionGenerationStatus: PipelineStatus;
-  /** JSON array of question objects with optional "answer" field. Null until generation completes. */
   questionsJson: string | null;
   recordingUploadUrl: string;
   recordingS3Key: string;
   scheduledAt: string | null;
   inviteExpiresAt: string;
-  /**
-   * True when the candidate has already verified their Google identity for this session.
-   * False means the GOOGLE_AUTH phase must be shown before setup.
-   * Populated by the backend from the candidate's googleVerified field.
-   */
   googleVerified: boolean;
 }
 
-/** One question object parsed from InterviewInitData.questionsJson */
 export interface InterviewQuestion {
   order: number;
   text: string;
@@ -361,7 +327,6 @@ export interface InterviewQuestion {
   answer?: string;
 }
 
-/** Mirrors CreateSessionRequest.java */
 export interface CreateSessionRequest {
   jobOpeningId: string;
   candidateId: string;
@@ -372,10 +337,6 @@ export interface SetMeetUrlRequest {
   meetUrl: string;
 }
 
-/**
- * One entry in a session's proctoring_flags_jsonb array.
- * Parse session.proctoringFlagsJsonb with JSON.parse() to get this.
- */
 export interface ProctoringFlag {
   type: SessionEventType;
   count?: number;
@@ -383,7 +344,6 @@ export interface ProctoringFlag {
   firstOccurrence?: string;
 }
 
-/** Mirrors SessionEvent.java — returned by the proctoring/events endpoint. */
 export interface SessionEvent {
   id: string;
   companyId: string;
@@ -436,7 +396,6 @@ export interface Wallet {
   availablePaise: number;    // balancePaise − reservedPaise
 }
 
-/** Mirrors TransactionResponse.java */
 export interface WalletTransaction {
   id: string;
   companyId: string;
@@ -463,9 +422,6 @@ export interface RazorpayOrder {
   keyId: string;             // Razorpay key ID for Checkout.js
 }
 
-// ── Email suppression ─────────────────────────────────────────────────────────
-
-/** Mirrors EmailSuppression.java */
 export interface EmailSuppression {
   id: string;
   email: string;

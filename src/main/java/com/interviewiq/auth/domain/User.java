@@ -66,11 +66,6 @@ public class User {
     @Column(nullable = false)
     private boolean emailVerified = false;
 
-    /**
-     * Timestamp of the most recent successful login. Null for accounts that
-     * registered but have never completed a login (e.g. pending email verification).
-     * Updated by AuthService.login() on every successful authentication. Added V028.
-     */
     private OffsetDateTime lastLoginAt;
 
     @Column(nullable = false, updatable = false)

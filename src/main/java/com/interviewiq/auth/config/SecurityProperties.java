@@ -104,46 +104,20 @@ public class SecurityProperties {
         public void setExpiration(Duration expiration) { this.expiration = expiration; }
     }
 
-    // =========================================================================
-    // Google OAuth (ID-token verification)
-    // =========================================================================
-
     public static class Google {
 
-        /**
-         * OAuth 2.0 Client ID from Google Cloud Console.
-         * Used by {@code GoogleOAuthService} to verify the {@code aud} claim
-         * in incoming Google ID tokens.
-         * In production: inject as {@code APP_SECURITY_GOOGLE_CLIENT_ID}.
-         */
         private String clientId = "";
 
         public String getClientId() { return clientId; }
         public void setClientId(String clientId) { this.clientId = clientId; }
     }
 
-    // =========================================================================
-    // Login-attempt lockout (per-IP failed-login tracking)
-    // =========================================================================
-
     public static class LoginAttempt {
 
-        /**
-         * Number of failed login attempts within the window that triggers lockout.
-         * Defaults to 5 per requirement: "5 failed attempts/IP/min → 15-min lockout".
-         */
         private int maxFailures = 5;
 
-        /**
-         * Sliding window in which failures are counted before lockout.
-         * Defaults to 1 minute.
-         */
         private Duration windowDuration = Duration.ofMinutes(1);
 
-        /**
-         * How long the IP is locked out after hitting {@code maxFailures}.
-         * Defaults to 15 minutes.
-         */
         private Duration lockoutDuration = Duration.ofMinutes(15);
 
         public int getMaxFailures() { return maxFailures; }

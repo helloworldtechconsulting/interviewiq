@@ -15,8 +15,6 @@ import { AuthProvider } from "@/components/common/AuthProvider";
 // can immediately attempt the token exchange before the first render.
 authStore.getState().hydrateFromStorage();
 
-// Google OAuth Client ID — set VITE_GOOGLE_CLIENT_ID in .env.local / per-environment
-// .env files. An empty string disables the Google sign-in buttons gracefully.
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? "";
 
 createRoot(document.getElementById("root")!).render(

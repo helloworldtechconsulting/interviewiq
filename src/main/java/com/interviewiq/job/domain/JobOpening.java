@@ -70,33 +70,15 @@ public class JobOpening {
     @Column(nullable = false, length = 50)
     private PipelineStatus jdExtractionStatus = PipelineStatus.PENDING;
 
-    /**
-     * Human-written job description shown to candidates and recruiters.
-     * Distinct from jdText (machine-extracted from uploaded JD file).
-     * Added V029.
-     */
     @Column(columnDefinition = "TEXT")
     private String description;
 
-    /**
-     * Minimum years of experience required. Added V029.
-     * DB CHECK: experience_min >= 0.
-     */
     @Column(name = "experience_min")
     private Integer experienceMin;
 
-    /**
-     * Maximum years of experience. Added V029.
-     * DB CHECK: experience_max IS NULL OR experience_max >= experience_min.
-     */
     @Column(name = "experience_max")
     private Integer experienceMax;
 
-    /**
-     * AI-generated or recruiter-curated question bank as a JSON array.
-     * Structure: [{"id":"...","text":"...","dimension":"TECHNICAL"}, ...]
-     * Added V029.
-     */
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "questions_jsonb", columnDefinition = "jsonb")
     private String questionsJsonb;

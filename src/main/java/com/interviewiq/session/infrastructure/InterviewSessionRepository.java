@@ -29,14 +29,6 @@ public interface InterviewSessionRepository extends JpaRepository<InterviewSessi
 
     Optional<InterviewSession> findByInviteTokenHash(String inviteTokenHash);
 
-    /**
-     * A page of sessions whose invite window has elapsed but that are still in the
-     * given status (INVITED) — drives {@code SessionExpiryJob}'s fetch-then-release loop.
-     *
-     * <p>Replaces the previous bulk JPQL UPDATE: each stale session must have its
-     * wallet reservation released individually (a bulk UPDATE stranded the funds),
-     * so the job needs the actual rows, not just a modified count.
-     */
     Page<InterviewSession> findByStatusAndInviteExpiresAtBefore(
             SessionStatus status, OffsetDateTime threshold, Pageable pageable);
 

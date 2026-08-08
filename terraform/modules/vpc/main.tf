@@ -1,20 +1,3 @@
-# =============================================================================
-# modules/vpc/main.tf
-#
-# Creates a production-grade VPC for InterviewIQ with:
-#   - 3 public subnets  (ALB, NAT Gateways)
-#   - 3 private subnets (ECS Fargate tasks, app tier)
-#   - 3 isolated subnets (RDS — no internet route at all)
-#   - NAT Gateways (1 per AZ in prod, 1 shared in dev/staging)
-#   - VPC Flow Logs → CloudWatch (security + compliance)
-#   - VPC Endpoints for S3 + ECR (saves NAT Gateway data costs)
-#
-# Subnet CIDR layout (example for 10.0.0.0/16):
-#   Public  : 10.0.0.0/24, 10.0.1.0/24, 10.0.2.0/24
-#   Private : 10.0.10.0/24, 10.0.11.0/24, 10.0.12.0/24
-#   Isolated: 10.0.20.0/24, 10.0.21.0/24, 10.0.22.0/24
-# =============================================================================
-
 locals {
   azs = slice(data.aws_availability_zones.available.names, 0, var.az_count)
 }
@@ -22,8 +5,6 @@ locals {
 data "aws_availability_zones" "available" {
   state = "available"
 }
-
-# ── VPC ───────────────────────────────────────────────────────────────────────
 
 resource "aws_vpc" "main" {
   cidr_block           = var.vpc_cidr
@@ -33,26 +14,22 @@ resource "aws_vpc" "main" {
   tags = merge(var.tags, { Name = "${var.project}-${var.env}-vpc" })
 }
 
-# ── Internet Gateway ──────────────────────────────────────────────────────────
-
 resource "aws_internet_gateway" "main" {
   vpc_id = aws_vpc.main.id
   tags   = merge(var.tags, { Name = "${var.project}-${var.env}-igw" })
 }
-
-# ── Subnets ───────────────────────────────────────────────────────────────────
 
 resource "aws_subnet" "public" {
   count                   = var.az_count
   vpc_id                  = aws_vpc.main.id
   cidr_block              = cidrsubnet(var.vpc_cidr, 8, count.index)
   availability_zone       = local.azs[count.index]
-  map_public_ip_on_launch = true # Only ALB lives here
+  map_public_ip_on_launch = true
 
   tags = merge(var.tags, {
     Name                     = "${var.project}-${var.env}-public-${local.azs[count.index]}"
     Tier                     = "public"
-    "kubernetes.io/role/elb" = "1" # future-proof for EKS migration
+    "kubernetes.io/role/elb" = "1"
   })
 }
 
@@ -81,10 +58,6 @@ resource "aws_subnet" "isolated" {
   })
 }
 
-# ── Elastic IPs + NAT Gateways ────────────────────────────────────────────────
-# prod: one NAT per AZ (HA — each AZ is self-sufficient during AZ failure)
-# dev/staging: single NAT to save ~$35/month per gateway
-
 resource "aws_eip" "nat" {
   count  = var.single_nat_gateway ? 1 : var.az_count
   domain = "vpc"
@@ -100,8 +73,6 @@ resource "aws_nat_gateway" "main" {
 
   depends_on = [aws_internet_gateway.main]
 }
-
-# ── Route Tables ──────────────────────────────────────────────────────────────
 
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.main.id
@@ -134,7 +105,6 @@ resource "aws_route_table_association" "private" {
   route_table_id = aws_route_table.private[var.single_nat_gateway ? 0 : count.index].id
 }
 
-# Isolated subnets have NO route to NAT or IGW — RDS only speaks within VPC
 resource "aws_route_table" "isolated" {
   vpc_id = aws_vpc.main.id
   tags   = merge(var.tags, { Name = "${var.project}-${var.env}-isolated-rt" })
@@ -145,8 +115,6 @@ resource "aws_route_table_association" "isolated" {
   subnet_id      = aws_subnet.isolated[count.index].id
   route_table_id = aws_route_table.isolated.id
 }
-
-# ── VPC Flow Logs (security + audit) ─────────────────────────────────────────
 
 resource "aws_cloudwatch_log_group" "flow_logs" {
   name              = "/aws/vpc/flowlogs/${var.project}-${var.env}"
@@ -194,8 +162,6 @@ resource "aws_flow_log" "main" {
   tags            = var.tags
 }
 
-# ── VPC Endpoints (cost optimisation — avoids NAT charges for S3/ECR) ────────
-
 resource "aws_vpc_endpoint" "s3" {
   vpc_id            = aws_vpc.main.id
   service_name      = "com.amazonaws.${var.region}.s3"
@@ -224,7 +190,6 @@ resource "aws_security_group" "vpc_endpoints" {
   tags = merge(var.tags, { Name = "${var.project}-${var.env}-vpc-endpoints-sg" })
 }
 
-# ECR API endpoint (needed to pull Docker images from private subnets)
 resource "aws_vpc_endpoint" "ecr_api" {
   vpc_id              = aws_vpc.main.id
   service_name        = "com.amazonaws.${var.region}.ecr.api"
@@ -245,7 +210,6 @@ resource "aws_vpc_endpoint" "ecr_dkr" {
   tags = merge(var.tags, { Name = "${var.project}-${var.env}-ecr-dkr-endpoint" })
 }
 
-# Secrets Manager endpoint (ECS tasks read secrets without leaving VPC)
 resource "aws_vpc_endpoint" "secretsmanager" {
   vpc_id              = aws_vpc.main.id
   service_name        = "com.amazonaws.${var.region}.secretsmanager"
@@ -256,7 +220,6 @@ resource "aws_vpc_endpoint" "secretsmanager" {
   tags = merge(var.tags, { Name = "${var.project}-${var.env}-secrets-endpoint" })
 }
 
-# CloudWatch Logs endpoint (ECS log shipping without NAT)
 resource "aws_vpc_endpoint" "logs" {
   vpc_id              = aws_vpc.main.id
   service_name        = "com.amazonaws.${var.region}.logs"

@@ -37,7 +37,6 @@ public class SessionExpiryJob {
 
     private static final Logger log = LoggerFactory.getLogger(SessionExpiryJob.class);
 
-    /** Sessions processed per page — bounds memory and per-transaction fan-out. */
     private static final int PAGE_SIZE = 100;
 
     private final InterviewSessionRepository sessionRepository;
@@ -64,8 +63,6 @@ public class SessionExpiryJob {
         int failed = 0;
 
         while (true) {
-            // Always re-fetch page 0: every successfully processed session leaves the
-            // INVITED set, so the query surface shrinks each round.
             List<InterviewSession> batch = sessionRepository.findByStatusAndInviteExpiresAtBefore(
                     SessionStatus.INVITED, now, PageRequest.of(0, PAGE_SIZE)).getContent();
 
@@ -73,10 +70,6 @@ public class SessionExpiryJob {
                 break;
             }
 
-            // Rows that DID NOT throw leave the INVITED set (expired, or already
-            // transitioned by a concurrent op). Only rows that threw remain and would
-            // be re-fetched. If a whole round makes no forward progress, every
-            // remaining row is failing — stop instead of looping forever.
             int advancedThisRound = 0;
             for (InterviewSession session : batch) {
                 try {
@@ -85,8 +78,6 @@ public class SessionExpiryJob {
                     }
                     advancedThisRound++;
                 } catch (Exception e) {
-                    // Isolate the failure (e.g. optimistic-lock clash on the wallet):
-                    // log and move on so one bad row cannot block the batch.
                     failed++;
                     log.error("SessionExpiryJob: failed to expire sessionId={}: {}",
                             session.getId(), e.getMessage(), e);

@@ -1,18 +1,3 @@
-# =============================================================================
-# shared/bootstrap/main.tf
-#
-# Run ONCE before any env workspace:
-#   cd terraform/shared/bootstrap
-#   terraform init && terraform apply
-#
-# Creates:
-#   - S3 bucket for Terraform remote state (versioned + encrypted)
-#   - DynamoDB table for state locking
-#   - KMS key for state encryption
-#
-# After this runs, copy the bucket/table names into each env's backend.tf
-# =============================================================================
-
 terraform {
   required_version = ">= 1.6"
   required_providers {
@@ -26,8 +11,6 @@ terraform {
 provider "aws" {
   region = var.region
 }
-
-# ── KMS key for state encryption ─────────────────────────────────────────────
 
 resource "aws_kms_key" "terraform_state" {
   description             = "KMS key for InterviewIQ Terraform state encryption"
@@ -45,12 +28,9 @@ resource "aws_kms_alias" "terraform_state" {
   target_key_id = aws_kms_key.terraform_state.key_id
 }
 
-# ── S3 bucket for remote state ────────────────────────────────────────────────
-
 resource "aws_s3_bucket" "terraform_state" {
   bucket = var.state_bucket_name
 
-  # Prevent accidental deletion of state
   lifecycle {
     prevent_destroy = true
   }
@@ -98,11 +78,9 @@ resource "aws_s3_bucket_lifecycle_configuration" "terraform_state" {
   }
 }
 
-# ── DynamoDB table for state locking ─────────────────────────────────────────
-
 resource "aws_dynamodb_table" "terraform_locks" {
   name         = var.lock_table_name
-  billing_mode = "PAY_PER_REQUEST" # no capacity planning needed for locking
+  billing_mode = "PAY_PER_REQUEST"
   hash_key     = "LockID"
 
   attribute {
@@ -124,8 +102,6 @@ resource "aws_dynamodb_table" "terraform_locks" {
     Project = "interviewiq"
   }
 }
-
-# ── Outputs ───────────────────────────────────────────────────────────────────
 
 output "state_bucket_name" {
   value       = aws_s3_bucket.terraform_state.bucket

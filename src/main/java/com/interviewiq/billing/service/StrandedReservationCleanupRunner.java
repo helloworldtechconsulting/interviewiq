@@ -18,24 +18,6 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
-/**
- * One-off remediation for reservations stranded by the pre-fix {@code SessionExpiryJob},
- * which bulk-flipped INVITED → EXPIRED without ever releasing the wallet reservation each
- * session held. Those PENDING RESERVATION rows still ring-fence {@code reservedPaise} on
- * their wallet even though the session is terminal.
- *
- * <p>This runner scans PENDING RESERVATION transactions whose session is now EXPIRED and
- * releases each via {@link WalletService#releaseFunds}, so it reuses the exact same
- * reserve/settle/release ledger logic (proper RELEASE rows, {@code @Version} respected,
- * wallet-integrity trigger honoured) rather than mutating balances by raw SQL.
- *
- * <p><b>Disabled by default.</b> Guarded by {@code app.billing.strand-cleanup.enabled}
- * (default {@code false}) so ops enables it for exactly one deploy, confirms the drained
- * total in the logs, then turns it back off. The work is idempotent regardless — once a
- * reservation is RELEASED it no longer matches the PENDING scan, so an accidental re-run
- * is a harmless no-op. Only EXPIRED sessions are touched: INVITED (still live) and STARTED
- * (in progress) reservations are deliberately left alone.
- */
 @Component
 public class StrandedReservationCleanupRunner implements ApplicationRunner {
 
@@ -68,16 +50,9 @@ public class StrandedReservationCleanupRunner implements ApplicationRunner {
         int failed = 0;
         long releasedPaise = 0L;
 
-        // Every processed tx id, so a row that does not leave the PENDING set — because it
-        // threw, or because releaseFunds could not locate it (idempotent no-op on a data
-        // anomaly) — is not mistaken for progress on the next page-0 re-fetch. A round with
-        // zero previously-unseen rows means the set has stopped shrinking: stop.
         Set<UUID> processed = new HashSet<>();
 
         while (true) {
-            // Every returned row is a PENDING reservation for an EXPIRED session, i.e.
-            // genuinely releasable. Always re-fetch page 0: each release leaves the
-            // PENDING set, so the result shrinks to empty.
             List<WalletTransaction> batch = txRepository.findReservationsForSessionsInStatus(
                     TransactionType.RESERVATION, TransactionStatus.PENDING, SessionStatus.EXPIRED,
                     PageRequest.of(0, PAGE_SIZE)).getContent();
@@ -89,7 +64,7 @@ public class StrandedReservationCleanupRunner implements ApplicationRunner {
             int newThisRound = 0;
             for (WalletTransaction reservation : batch) {
                 if (!processed.add(reservation.getId())) {
-                    continue;   // already attempted in a prior round — skip to detect a stall
+                    continue;
                 }
                 newThisRound++;
                 UUID sessionId = reservation.getSessionId();
@@ -104,8 +79,6 @@ public class StrandedReservationCleanupRunner implements ApplicationRunner {
                 }
             }
 
-            // No previously-unseen rows this round => the PENDING set is no longer shrinking
-            // (rows stuck due to failures or unresolvable lookups). Stop instead of looping.
             if (newThisRound == 0) {
                 log.error("StrandedReservationCleanupRunner: {} reservation(s) remain PENDING but "
                         + "could not be released; aborting sweep for manual follow-up", batch.size());

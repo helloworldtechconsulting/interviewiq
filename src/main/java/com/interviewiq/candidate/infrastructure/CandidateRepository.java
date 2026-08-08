@@ -31,9 +31,5 @@ public interface CandidateRepository extends JpaRepository<Candidate, UUID> {
      */
     List<Candidate> findAllByResumeExtractionStatusInAndResumeS3KeyIsNotNull(Collection<PipelineStatus> statuses);
 
-    /**
-     * Finds a candidate by their verified Google subject ({@code sub} claim).
-     * Used to detect returning candidates across sessions.
-     */
     Optional<Candidate> findByGoogleSubject(String googleSubject);
 }

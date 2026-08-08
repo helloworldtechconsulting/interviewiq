@@ -1,14 +1,3 @@
-# =============================================================================
-# envs/staging/main.tf — Staging environment (full module wiring)
-#
-# Mirrors prod but with cost-optimised sizing:
-#   - 2 AZs, single NAT gateway (save ~$65/mo vs 3 NAT GWs)
-#   - RDS db.t4g.small, single-AZ, 20 GB storage
-#   - ECS 512 CPU / 1024 MB, min 1 task, max 5 tasks
-#   - DMARC policy: quarantine (graduated from 'none')
-#   - WAF + CloudFront wired identically to prod
-# =============================================================================
-
 locals {
   env     = "staging"
   project = "interviewiq"
@@ -39,21 +28,16 @@ terraform {
   }
 }
 
-# Primary provider — ap-south-1 (Mumbai)
 provider "aws" {
   region = var.region
   default_tags { tags = local.common_tags }
 }
 
-# Alias provider — us-east-1 required for CloudFront ACM certificates
-# AWS enforces that CloudFront certs must be provisioned in us-east-1 globally.
 provider "aws" {
   alias  = "us_east_1"
   region = "us-east-1"
   default_tags { tags = local.common_tags }
 }
-
-# ── Variables ─────────────────────────────────────────────────────────────────
 
 variable "region"              { type = string; default = "ap-south-1" }
 variable "domain"              { type = string; default = "interviewiq.ai" }
@@ -67,8 +51,6 @@ variable "openai_api_key"      { type = string; sensitive = true }
 variable "razorpay_key_id"     { type = string; sensitive = true }
 variable "razorpay_key_secret" { type = string; sensitive = true }
 
-# ── Data Sources ──────────────────────────────────────────────────────────────
-
 data "aws_caller_identity" "current" {}
 
 data "aws_route53_zone" "main" {
@@ -76,11 +58,9 @@ data "aws_route53_zone" "main" {
   private_zone = false
 }
 
-# ── Shared KMS Key ────────────────────────────────────────────────────────────
-
 resource "aws_kms_key" "shared" {
   description             = "KMS for ${local.project} ${local.env} (CloudWatch + misc)"
-  deletion_window_in_days = 14  # Shorter window — staging data is not critical
+  deletion_window_in_days = 14
   enable_key_rotation     = true
   tags                    = local.common_tags
 }
@@ -90,8 +70,6 @@ resource "aws_kms_alias" "shared" {
   target_key_id = aws_kms_key.shared.key_id
 }
 
-# ── Modules ───────────────────────────────────────────────────────────────────
-
 module "vpc" {
   source = "../../modules/vpc"
 
@@ -99,8 +77,8 @@ module "vpc" {
   env                = local.env
   region             = local.region
   vpc_cidr           = "10.2.0.0/16"
-  az_count           = 2     # 2 AZs sufficient for staging
-  single_nat_gateway = true  # Cost saving: one NAT shared across private subnets
+  az_count           = 2
+  single_nat_gateway = true
   kms_key_arn        = aws_kms_key.shared.arn
   tags               = local.common_tags
 }
@@ -138,10 +116,6 @@ module "s3" {
   cors_allowed_origins = ["https://staging.${local.domain}", "https://${local.domain}"]
   tags                 = local.common_tags
 }
-
-# ── ACM Certificate — ALB (ap-south-1) ───────────────────────────────────────
-# Provisioned as a resource (not data source) so staging env is self-contained.
-# DNS validation records are written to Route53 automatically.
 
 resource "aws_acm_certificate" "alb" {
   domain_name               = "*.${local.domain}"
@@ -219,13 +193,13 @@ module "rds" {
   isolated_subnet_ids   = module.vpc.isolated_subnet_ids
   ecs_security_group_id = module.ecs.ecs_security_group_id
   kms_key_arn           = module.secrets.kms_key_arn
-  instance_class        = "db.t4g.small"  # Half the cost of t4g.medium
+  instance_class        = "db.t4g.small"
   db_name               = "interviewiq"
   db_username           = "interviewiq"
   db_password           = var.db_password
   allocated_storage     = 20
   max_allocated_storage = 100
-  multi_az              = false           # Single-AZ to save ~$50/mo in staging
+  multi_az              = false
   backup_retention_days = 7
   create_read_replica   = false
   tags                  = local.common_tags
@@ -247,7 +221,6 @@ module "ecs" {
   ecr_repository_url      = module.ecr.backend_repository_url
   image_tag               = var.image_tag
 
-  # Staging sizing: 0.5 vCPU / 1 GB — sufficient for functional testing
   task_cpu    = 512
   task_memory = 1024
 
@@ -260,7 +233,7 @@ module "ecs" {
   db_username        = "interviewiq"
   s3_bucket_name     = module.s3.bucket_name
   domain             = local.domain
-  session_cost_paise = 10000  # ₹100 — same as prod; never test with lower values
+  session_cost_paise = 10000
 
   db_password_secret_arn = module.secrets.db_password_arn
   jwt_keys_secret_arn    = module.secrets.jwt_keys_arn
@@ -295,7 +268,7 @@ module "ses" {
   domain          = local.domain
   route53_zone_id = data.aws_route53_zone.main.zone_id
   alert_topic_arn = module.cloudwatch.alert_topic_arn
-  dmarc_policy    = "quarantine"  # Graduated from 'none' after monitoring period
+  dmarc_policy    = "quarantine"
   tags            = local.common_tags
 }
 
@@ -307,7 +280,7 @@ module "waf" {
   region                           = local.region
   alb_arn                          = module.alb.alb_arn
   alert_topic_arn                  = module.cloudwatch.alert_topic_arn
-  blocked_requests_alarm_threshold = 500  # Same threshold as prod; adjust if noisy
+  blocked_requests_alarm_threshold = 500
   tags                             = local.common_tags
 }
 
@@ -328,8 +301,6 @@ module "cloudfront" {
   tags            = local.common_tags
 }
 
-# ── DNS: API endpoint → ALB ───────────────────────────────────────────────────
-
 resource "aws_route53_record" "api" {
   zone_id = data.aws_route53_zone.main.zone_id
   name    = "api.${local.domain}"
@@ -341,8 +312,6 @@ resource "aws_route53_record" "api" {
     evaluate_target_health = true
   }
 }
-
-# ── Outputs ───────────────────────────────────────────────────────────────────
 
 output "alb_dns_name"      { value = module.alb.alb_dns_name }
 output "api_url"           { value = "https://api.${local.domain}" }

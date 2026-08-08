@@ -18,33 +18,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/**
- * Candidate Google identity verification endpoint.
- *
- * <p>Sits in the candidate security chain ({@code /api/v1/candidate/**}),
- * so every request must already carry a valid HMAC invite token.
- * The {@link CandidatePrincipal} is already resolved by the time this
- * controller is called — no additional authentication is needed.
- *
- * <h2>Purpose</h2>
- * <p>This endpoint allows a candidate to prove their Google identity
- * during the interview setup phase. The backend:
- * <ol>
- *   <li>Verifies the Google ID token.</li>
- *   <li>Stores {@code googleSubject}, {@code googleEmail}, and sets
- *       {@code googleVerified = true} on the {@link Candidate} row.</li>
- * </ol>
- *
- * <p>The frontend checks {@code initData.googleVerified} (from
- * {@code GET /api/v1/candidate/interview/init}) to decide whether to
- * show the Google sign-in step before the interview setup phase.
- *
- * <h2>Idempotency</h2>
- * <p>If the candidate has already verified via Google, calling this
- * endpoint again with the same or a different token simply updates the
- * stored Google identity. This is intentional — it allows the candidate
- * to re-verify after a page refresh without any UX friction.
- */
 @RestController
 @RequestMapping("/api/v1/candidate/auth")
 public class CandidateAuthController {
@@ -60,15 +33,6 @@ public class CandidateAuthController {
         this.candidateRepository = candidateRepository;
     }
 
-    /**
-     * POST /api/v1/candidate/auth/google
-     *
-     * <p>Verifies the Google ID token and records the identity on the candidate.
-     *
-     * @param principal the candidate principal extracted from the invite token
-     * @param request   the Google ID token from the frontend
-     * @return success response with no payload
-     */
     @PostMapping("/google")
     @Transactional
     public ApiResponse<Void> verifyGoogleIdentity(

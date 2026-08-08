@@ -1,25 +1,3 @@
-# =============================================================================
-# modules/iam/main.tf
-#
-# Least-privilege IAM roles for InterviewIQ ECS tasks.
-#
-# Two roles per service:
-#   1. Task Execution Role — used by ECS agent to pull images + inject secrets
-#   2. Task Role           — used by the application container at runtime
-#
-# The Task Role follows the principle of least privilege:
-#   - S3: only the specific bucket, only needed actions
-#   - SES: only SendEmail + SendRawEmail
-#   - Secrets Manager: only the secrets this service needs
-#   - No wildcard (*) resource ARNs
-# =============================================================================
-
-# ── ECS Task Execution Role ───────────────────────────────────────────────────
-# Used by the ECS agent (not your code) to:
-#   - Pull container images from ECR
-#   - Pull secret values from Secrets Manager for env var injection
-#   - Write logs to CloudWatch
-
 resource "aws_iam_role" "task_execution" {
   name = "${var.project}-${var.env}-ecs-task-execution-role"
 
@@ -35,13 +13,11 @@ resource "aws_iam_role" "task_execution" {
   tags = var.tags
 }
 
-# Managed policy covers ECR pull + CloudWatch Logs
 resource "aws_iam_role_policy_attachment" "task_execution_managed" {
   role       = aws_iam_role.task_execution.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
-# Inline policy for Secrets Manager read + KMS decrypt
 resource "aws_iam_role_policy" "task_execution_secrets" {
   name = "secrets-read"
   role = aws_iam_role.task_execution.id
@@ -71,9 +47,6 @@ resource "aws_iam_role_policy" "task_execution_secrets" {
   })
 }
 
-# ── ECS Task Role (Runtime) ───────────────────────────────────────────────────
-# Used by the Spring Boot application container itself.
-
 resource "aws_iam_role" "task" {
   name = "${var.project}-${var.env}-ecs-task-role"
 
@@ -96,7 +69,6 @@ resource "aws_iam_role" "task" {
 
 data "aws_caller_identity" "current" {}
 
-# S3 access — scoped to interviewiq bucket and specific prefixes
 resource "aws_iam_role_policy" "task_s3" {
   name = "s3-access"
   role = aws_iam_role.task.id
@@ -133,7 +105,6 @@ resource "aws_iam_role_policy" "task_s3" {
   })
 }
 
-# SES — send email only (no admin actions)
 resource "aws_iam_role_policy" "task_ses" {
   name = "ses-send"
   role = aws_iam_role.task.id
@@ -159,7 +130,6 @@ resource "aws_iam_role_policy" "task_ses" {
   })
 }
 
-# CloudWatch — write metrics + logs (no delete)
 resource "aws_iam_role_policy" "task_cloudwatch" {
   name = "cloudwatch-write"
   role = aws_iam_role.task.id
@@ -180,7 +150,6 @@ resource "aws_iam_role_policy" "task_cloudwatch" {
   })
 }
 
-# AWS X-Ray — allow the application + X-Ray daemon to send trace segments
 resource "aws_iam_role_policy" "task_xray" {
   name = "xray-write"
   role = aws_iam_role.task.id

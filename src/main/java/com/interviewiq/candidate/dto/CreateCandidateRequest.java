@@ -21,7 +21,6 @@ public record CreateCandidateRequest(
         @Size(max = 255)
         String fullName,
 
-        /** Optional candidate phone number. */
         @Size(max = 30, message = "Phone number must be at most 30 characters.")
         String phone
 ) {}

@@ -178,7 +178,6 @@ public class EvaluationWorker {
      * evaluator will treat it as a blank answer.
      */
     private String buildEvaluationPrompt(String questionsJson) {
-        // Format as readable Q&A pairs for the LLM prompt
         String qaSection = formatQuestionsForPrompt(questionsJson);
 
         return """
@@ -219,12 +218,6 @@ public class EvaluationWorker {
                 """;
     }
 
-    /**
-     * Formats the questions JSON into a readable Q&A block for the LLM prompt.
-     *
-     * <p>Falls back to the raw JSON if parsing fails (the LLM can still attempt
-     * evaluation with the raw data).
-     */
     private String formatQuestionsForPrompt(String questionsJson) {
         if (questionsJson == null || questionsJson.isBlank()) {
             return "[NO QUESTIONS AVAILABLE — question generation may not have completed]";
@@ -233,7 +226,7 @@ public class EvaluationWorker {
         try {
             JsonNode questions = objectMapper.readTree(questionsJson);
             if (!questions.isArray() || questions.isEmpty()) {
-                return questionsJson; // fallback
+                return questionsJson;
             }
 
             StringBuilder sb = new StringBuilder();

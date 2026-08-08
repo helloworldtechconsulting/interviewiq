@@ -29,30 +29,6 @@ import org.springframework.web.bind.annotation.*;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 
-/**
- * Google OAuth endpoints for employer (recruiter/admin) accounts.
- *
- * <h2>Endpoints</h2>
- * <ul>
- *   <li>{@code POST /api/v1/{slug}/auth/google} — login or link an existing account
- *       within a known company. Company-scoped: the same Google account may exist
- *       across different companies without conflict.</li>
- *   <li>{@code POST /api/v1/auth/google/register} — register a brand-new company
- *       with Google OAuth. No slug required (company doesn't exist yet).</li>
- * </ul>
- *
- * <h2>Security</h2>
- * <p>Both endpoints are permit-all in {@link com.interviewiq.auth.config.SecurityConfig}.
- * The slug-scoped login endpoint is covered by the wildcard pattern for auth routes.
- * The register endpoint is covered by an explicit pattern for Google auth routes.
- *
- * <h2>Google account linking</h2>
- * <p>For the login endpoint: if a user with the matching email already exists in the
- * company but has no {@code googleSubject}, this controller links the Google subject
- * to that account (one-time automatic account linking). If neither email nor
- * {@code googleSubject} matches, a new RECRUITER account is created with
- * {@code emailVerified = true} (Google has already verified it).
- */
 @RestController
 public class GoogleOAuthController {
 
@@ -85,25 +61,6 @@ public class GoogleOAuthController {
         this.securityProperties      = securityProperties;
     }
 
-    // =========================================================================
-    // POST /api/v1/{slug}/auth/google — login / auto-register within company
-    // =========================================================================
-
-    /**
-     * Logs in or auto-registers an employer using a Google ID token.
-     *
-     * <p>Covered by the slug-wildcard auth permit-all pattern already in
-     * {@code SecurityConfig}.
-     *
-     * <p>Algorithm:
-     * <ol>
-     *   <li>Verify the Google ID token.</li>
-     *   <li>Look up user by {@code (companyId, googleSubject)} — fastest path.</li>
-     *   <li>If not found, look up by {@code (companyId, email)} — link google subject.</li>
-     *   <li>If still not found, auto-create a RECRUITER account (emailVerified = true).</li>
-     *   <li>Issue a JWT + refresh token pair.</li>
-     * </ol>
-     */
     @PostMapping("/api/v1/{slug}/auth/google")
     @Transactional
     public ApiResponse<AuthResponse> googleLogin(
@@ -119,28 +76,24 @@ public class GoogleOAuthController {
 
         Company company = authService.requireCompanyBySlug(slug);
 
-        // 1. Lookup by google subject (already linked)
         User user = userRepository
                 .findByCompanyIdAndGoogleSubject(company.getId(), googleSubject)
                 .orElse(null);
 
         if (user == null) {
-            // 2. Lookup by email — auto-link
             user = userRepository
                     .findByCompanyIdAndEmail(company.getId(), email)
                     .orElse(null);
 
             if (user != null) {
-                // Link the Google subject to the existing account
                 user.setGoogleSubject(googleSubject);
-                user.setEmailVerified(true); // Google verifies email
+                user.setEmailVerified(true);
                 userRepository.save(user);
                 log.info("Google account linked to existing user: userId={}", user.getId());
             }
         }
 
         if (user == null) {
-            // 3. Auto-create a RECRUITER account (Google email is already verified)
             user = new User();
             user.setCompanyId(company.getId());
             user.setFullName(fullName.strip());
@@ -163,21 +116,6 @@ public class GoogleOAuthController {
         return ApiResponse.ok(issueTokenPair(user));
     }
 
-    // =========================================================================
-    // POST /api/v1/auth/google/register — register a brand-new company
-    // =========================================================================
-
-    /**
-     * Registers a brand-new company using a Google ID token.
-     *
-     * <p>This endpoint does NOT require a slug — the company doesn't exist yet.
-     * A slug is derived from the {@code companyName}.
-     *
-     * <p>The created admin account is immediately {@code emailVerified = true}
-     * because Google has already verified the email.
-     *
-     * <p>No OTP email is dispatched (email is already verified via Google).
-     */
     @PostMapping("/api/v1/auth/google/register")
     @ResponseStatus(HttpStatus.CREATED)
     @Transactional
@@ -191,7 +129,6 @@ public class GoogleOAuthController {
         String fullName      = (String) payload.get("name");
         if (fullName == null || fullName.isBlank()) fullName = email;
 
-        // Derive slug from company name
         String baseSlug = request.companyName().toLowerCase()
                 .replaceAll("\\s+", "-")
                 .replaceAll("[^a-z0-9-]", "");
@@ -201,14 +138,12 @@ public class GoogleOAuthController {
             throw new ConflictException("A company with this slug already exists. Please try a different company name.");
         }
 
-        // ── Create Company ─────────────────────────────────────────────────────
         Company company = new Company();
         company.setName(request.companyName().strip());
         company.setSlug(slug);
         company.setStatus(CompanyStatus.ACTIVE);
         companyRepository.save(company);
 
-        // ── Create admin User ──────────────────────────────────────────────────
         if (userRepository.existsByCompanyIdAndEmail(company.getId(), email)) {
             throw new ConflictException("An account with this email already exists.");
         }
@@ -220,10 +155,9 @@ public class GoogleOAuthController {
         admin.setGoogleSubject(googleSubject);
         admin.setRole(UserRole.ADMIN);
         admin.setActive(true);
-        admin.setEmailVerified(true); // Google already verified the email
+        admin.setEmailVerified(true);
         userRepository.save(admin);
 
-        // ── Create empty Wallet ────────────────────────────────────────────────
         Wallet wallet = new Wallet();
         wallet.setCompanyId(company.getId());
         walletRepository.save(wallet);
@@ -233,10 +167,6 @@ public class GoogleOAuthController {
 
         return ApiResponse.created(issueTokenPair(admin));
     }
-
-    // =========================================================================
-    // Private helpers
-    // =========================================================================
 
     private AuthResponse issueTokenPair(User user) {
         String accessToken = tokenService.generateAccessToken(user);

@@ -1,37 +1,3 @@
-# =============================================================================
-# modules/waf/main.tf
-#
-# AWS WAFv2 Web ACL attached to the Application Load Balancer.
-#
-# Rule set (evaluated in priority order, lowest number = highest priority):
-#
-#   1.  AWS Managed — Core Rule Set (CRS)          P=10  BLOCK
-#       Protects against OWASP Top 10: SQLi, XSS, command injection,
-#       HTTP protocol violations, and common web exploits.
-#
-#   2.  AWS Managed — Known Bad Inputs              P=20  BLOCK
-#       Blocks requests with payloads associated with CVEs and common attacks.
-#
-#   3.  AWS Managed — IP Reputation List            P=30  BLOCK
-#       Blocks IPs from Amazon's threat intelligence list (botnets, scrapers).
-#
-#   4.  AWS Managed — Anonymous IP List             P=40  COUNT (not block)
-#       Flags requests from TOR exits and anonymous proxies. Counted only —
-#       InterviewIQ candidates may legitimately use VPNs.
-#
-#   5.  Rate limiting — global (all IPs)            P=100 BLOCK
-#       Blocks IPs that send > 2000 requests per 5 minutes across all paths.
-#
-#   6.  Rate limiting — auth endpoints              P=90  BLOCK
-#       Tighter limit: 100 requests per 5 minutes to /auth/* paths.
-#       Prevents OTP brute-force and credential stuffing at the CDN layer.
-#
-# Scope: REGIONAL (attached to ALB, not CloudFront).
-# CloudFront WAF requires scope=CLOUDFRONT and must be in us-east-1.
-# For a full setup, create a separate WAF module with scope=CLOUDFRONT
-# and attach it to the CloudFront distribution.
-# =============================================================================
-
 resource "aws_wafv2_web_acl" "main" {
   name        = "${var.project}-${var.env}-waf"
   description = "WAF for ${var.project} ${var.env} ALB"
@@ -41,13 +7,12 @@ resource "aws_wafv2_web_acl" "main" {
     allow {}
   }
 
-  # ── Rule 1: AWS Core Rule Set (CRS) ─────────────────────────────────────────
   rule {
     name     = "AWSManagedRulesCommonRuleSet"
     priority = 10
 
     override_action {
-      none {} # use the managed rule group's own action (BLOCK)
+      none {}
     }
 
     statement {
@@ -55,12 +20,10 @@ resource "aws_wafv2_web_acl" "main" {
         name        = "AWSManagedRulesCommonRuleSet"
         vendor_name = "AWS"
 
-        # Exclude SizeRestrictions_BODY — interview transcripts can be large
         rule_action_override {
           name = "SizeRestrictions_BODY"
           action_to_use { count {} }
         }
-        # Exclude GenericRFI — Spring Boot actuator paths can trigger this
         rule_action_override {
           name = "GenericRFI_BODY"
           action_to_use { count {} }
@@ -75,7 +38,6 @@ resource "aws_wafv2_web_acl" "main" {
     }
   }
 
-  # ── Rule 2: Known Bad Inputs ─────────────────────────────────────────────────
   rule {
     name     = "AWSManagedRulesKnownBadInputsRuleSet"
     priority = 20
@@ -96,7 +58,6 @@ resource "aws_wafv2_web_acl" "main" {
     }
   }
 
-  # ── Rule 3: IP Reputation List ────────────────────────────────────────────────
   rule {
     name     = "AWSManagedRulesAmazonIpReputationList"
     priority = 30
@@ -117,12 +78,11 @@ resource "aws_wafv2_web_acl" "main" {
     }
   }
 
-  # ── Rule 4: Anonymous IP List (COUNT only) ─────────────────────────────────
   rule {
     name     = "AWSManagedRulesAnonymousIpList"
     priority = 40
 
-    override_action { count {} } # count, not block — VPN users are legitimate candidates
+    override_action { count {} }
 
     statement {
       managed_rule_group_statement {
@@ -138,9 +98,6 @@ resource "aws_wafv2_web_acl" "main" {
     }
   }
 
-  # ── Rule 5: Auth endpoint rate limit (tighter) ─────────────────────────────
-  # Applies specifically to /api/v1/*/auth/* paths.
-  # 100 requests per 5-minute window per IP. Blocks OTP brute-force.
   rule {
     name     = "AuthEndpointRateLimit"
     priority = 90
@@ -180,9 +137,6 @@ resource "aws_wafv2_web_acl" "main" {
     }
   }
 
-  # ── Rule 6: Global rate limit ─────────────────────────────────────────────
-  # 2000 requests per 5-minute window per IP across all endpoints.
-  # Protects against DDoS and aggressive scrapers without affecting normal users.
   rule {
     name     = "GlobalRateLimit"
     priority = 100
@@ -222,14 +176,10 @@ resource "aws_wafv2_web_acl" "main" {
   tags = var.tags
 }
 
-# ── Attach WAF to ALB ─────────────────────────────────────────────────────────
-
 resource "aws_wafv2_web_acl_association" "alb" {
   resource_arn = var.alb_arn
   web_acl_arn  = aws_wafv2_web_acl.main.arn
 }
-
-# ── CloudWatch Alarms: WAF Blocked Requests ───────────────────────────────────
 
 resource "aws_cloudwatch_metric_alarm" "waf_blocked_high" {
   alarm_name          = "${var.project}-${var.env}-waf-blocked-high"
@@ -237,7 +187,7 @@ resource "aws_cloudwatch_metric_alarm" "waf_blocked_high" {
   evaluation_periods  = 2
   metric_name         = "BlockedRequests"
   namespace           = "AWS/WAFV2"
-  period              = 300 # 5 minutes
+  period              = 300
   statistic           = "Sum"
   threshold           = var.blocked_requests_alarm_threshold
   alarm_description   = "WAF blocked requests spike — possible attack in progress"
@@ -253,11 +203,7 @@ resource "aws_cloudwatch_metric_alarm" "waf_blocked_high" {
   tags = var.tags
 }
 
-# ── WAF Logging ───────────────────────────────────────────────────────────────
-# Logs all WAF decisions to CloudWatch Logs for forensics.
-
 resource "aws_cloudwatch_log_group" "waf" {
-  # WAF log group name MUST start with "aws-waf-logs-"
   name              = "aws-waf-logs-${var.project}-${var.env}"
   retention_in_days = var.env == "prod" ? 90 : 14
   tags              = var.tags
@@ -267,7 +213,6 @@ resource "aws_wafv2_web_acl_logging_configuration" "main" {
   log_destination_configs = [aws_cloudwatch_log_group.waf.arn]
   resource_arn            = aws_wafv2_web_acl.main.arn
 
-  # Redact Authorization headers from logs (never log tokens)
   redacted_fields {
     single_header { name = "authorization" }
   }

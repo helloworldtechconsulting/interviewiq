@@ -7,7 +7,7 @@ variable "region" {
 variable "state_bucket_name" {
   description = "Globally unique S3 bucket name for Terraform state"
   type        = string
-  default     = "interviewiq-terraform-state-prod" # CHANGE: must be globally unique
+  default     = "interviewiq-terraform-state-prod"
 }
 
 variable "lock_table_name" {

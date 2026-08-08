@@ -1,31 +1,9 @@
-# =============================================================================
-# modules/ecs/main.tf
-#
-# ECS Fargate cluster + service for Spring Boot backend (InterviewIQ).
-#
-# Architecture:
-#   ALB → Target Group → ECS Service → Tasks (private subnet)
-#
-# Java 21 / Spring Boot specifics:
-#   - Virtual threads: no tuning needed (they're lightweight)
-#   - JVM heap: set to 75% of container memory via JAVA_OPTS
-#   - Graceful shutdown: ECS stop timeout = 30s, Spring shutdown.graceful
-#   - Health check: /actuator/health (already configured in application.yml)
-#
-# Scaling:
-#   - CPU-based target tracking (70% threshold)
-#   - Min 1 task (dev), Min 2 tasks (prod — across AZs)
-#   - Scale-in cooldown 300s to avoid flapping
-# =============================================================================
-
-# ── ECS Cluster ───────────────────────────────────────────────────────────────
-
 resource "aws_ecs_cluster" "main" {
   name = "${var.project}-${var.env}"
 
   setting {
     name  = "containerInsights"
-    value = var.env == "prod" ? "enabled" : "disabled" # ~$3/cluster/month
+    value = var.env == "prod" ? "enabled" : "disabled"
   }
 
   tags = var.tags
@@ -42,8 +20,6 @@ resource "aws_ecs_cluster_capacity_providers" "main" {
   }
 }
 
-# ── CloudWatch Log Group ──────────────────────────────────────────────────────
-
 resource "aws_cloudwatch_log_group" "backend" {
   name              = "/ecs/${var.project}/${var.env}/backend"
   retention_in_days = var.env == "prod" ? 90 : 14
@@ -51,14 +27,11 @@ resource "aws_cloudwatch_log_group" "backend" {
   tags              = var.tags
 }
 
-# ── Security Group for ECS Tasks ──────────────────────────────────────────────
-
 resource "aws_security_group" "ecs_tasks" {
   name        = "${var.project}-${var.env}-ecs-sg"
   description = "Spring Boot ECS tasks"
   vpc_id      = var.vpc_id
 
-  # Inbound: only from ALB
   ingress {
     description     = "HTTP from ALB"
     from_port       = 8080
@@ -67,7 +40,6 @@ resource "aws_security_group" "ecs_tasks" {
     security_groups = [var.alb_security_group_id]
   }
 
-  # Outbound: RDS (5432), HTTPS for OpenAI/Razorpay/SES APIs, AWS services
   egress {
     description = "All outbound (NAT Gateway filters to internet; VPC endpoints for AWS services)"
     from_port   = 0
@@ -83,8 +55,6 @@ resource "aws_security_group" "ecs_tasks" {
   }
 }
 
-# ── ECS Task Definition ───────────────────────────────────────────────────────
-
 resource "aws_ecs_task_definition" "backend" {
   family                   = "${var.project}-${var.env}-backend"
   network_mode             = "awsvpc"
@@ -95,13 +65,10 @@ resource "aws_ecs_task_definition" "backend" {
   task_role_arn            = var.task_role_arn
 
   container_definitions = jsonencode([
-    # ── X-Ray Daemon sidecar ───────────────────────────────────────────────
-    # Collects trace segments from the Spring Boot app and ships them to X-Ray.
-    # Uses UDP port 2000 — no inbound security group rule needed (same task network).
     {
       name      = "xray-daemon"
       image     = "public.ecr.aws/xray/aws-xray-daemon:3.x"
-      essential = false # don't take down the whole task if daemon crashes
+      essential = false
 
       portMappings = [{
         containerPort = 2000
@@ -121,7 +88,6 @@ resource "aws_ecs_task_definition" "backend" {
         }
       }
 
-      # Minimal resources — daemon is lightweight
       cpu    = 32
       memory = 64
 
@@ -138,7 +104,6 @@ resource "aws_ecs_task_definition" "backend" {
         protocol      = "tcp"
       }]
 
-      # ── Environment Variables (non-sensitive) ──────────────────────────
       environment = [
         { name = "SPRING_PROFILES_ACTIVE", value = var.env == "dev" ? "local" : "prod" },
         { name = "SERVER_PORT",            value = "8080" },
@@ -150,7 +115,6 @@ resource "aws_ecs_task_definition" "backend" {
         { name = "AWS_S3_BUCKET",          value = var.s3_bucket_name },
         { name = "APP_FRONTEND_BASE_URL",  value = "https://${var.domain}" },
         { name = "APP_BILLING_SESSION_COST_PAISE", value = tostring(var.session_cost_paise) },
-        # X-Ray SDK — points to the daemon sidecar in the same task network namespace
         { name = "AWS_XRAY_DAEMON_ADDRESS",  value = "127.0.0.1:2000" },
         { name = "AWS_XRAY_CONTEXT_MISSING", value = "LOG_ERROR" },
         {
@@ -159,9 +123,6 @@ resource "aws_ecs_task_definition" "backend" {
         }
       ]
 
-      # ── Secrets (injected from Secrets Manager at task start) ──────────
-      # Spring Boot reads these as env vars at startup.
-      # The ECS agent decrypts and injects them — never stored in task def.
       secrets = [
         { name = "DB_PASSWORD",                          valueFrom = "${var.db_password_secret_arn}:::" },
         { name = "APP_SECURITY_JWT_PRIVATE_KEY_PEM",     valueFrom = "${var.jwt_keys_secret_arn}:private_key_pem::" },
@@ -172,16 +133,14 @@ resource "aws_ecs_task_definition" "backend" {
         { name = "RAZORPAY_KEY_SECRET",                  valueFrom = "${var.razorpay_secret_arn}:key_secret::" }
       ]
 
-      # ── Health Check ───────────────────────────────────────────────────
       healthCheck = {
         command     = ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health || exit 1"]
         interval    = 30
         timeout     = 10
         retries     = 3
-        startPeriod = 60 # JVM warmup — Spring + Flyway migrations take ~30s
+        startPeriod = 60
       }
 
-      # ── Logging → CloudWatch ───────────────────────────────────────────
       logConfiguration = {
         logDriver = "awslogs"
         options = {
@@ -191,21 +150,17 @@ resource "aws_ecs_task_definition" "backend" {
         }
       }
 
-      # ── Resource limits ────────────────────────────────────────────────
-      # Fargate enforces task-level CPU/memory; soft limits guide scheduler
       ulimits = [{
         name      = "nofile"
         softLimit = 65536
         hardLimit = 65536
       }]
 
-      # Readonly root filesystem (security hardening)
-      readonlyRootFilesystem = false # Spring writes temp files; set true after testing
-      user                   = "1000" # non-root user (defined in Dockerfile)
+      readonlyRootFilesystem = false
+      user                   = "1000"
     }
   ])
 
-  # Fargate requires ephemeral storage declaration for anything > 20GB
   ephemeral_storage {
     size_in_gib = 21
   }
@@ -213,19 +168,16 @@ resource "aws_ecs_task_definition" "backend" {
   tags = var.tags
 }
 
-# ── ECS Service ───────────────────────────────────────────────────────────────
-
 resource "aws_ecs_service" "backend" {
   name                               = "${var.project}-${var.env}-backend"
   cluster                            = aws_ecs_cluster.main.id
   task_definition                    = aws_ecs_task_definition.backend.arn
   desired_count                      = var.desired_count
-  launch_type                        = null # managed by capacity_provider_strategy
+  launch_type                        = null
   platform_version                   = "LATEST"
-  health_check_grace_period_seconds  = 90 # give Spring Boot + Flyway time to start
+  health_check_grace_period_seconds  = 90
 
-  # Graceful shutdown — matches Spring's server.shutdown=graceful
-  enable_execute_command = var.env != "prod" # ECS Exec for debugging in dev/staging
+  enable_execute_command = var.env != "prod"
 
   capacity_provider_strategy {
     capacity_provider = var.env == "prod" ? "FARGATE" : "FARGATE_SPOT"
@@ -236,7 +188,7 @@ resource "aws_ecs_service" "backend" {
   network_configuration {
     subnets          = var.private_subnet_ids
     security_groups  = [aws_security_group.ecs_tasks.id]
-    assign_public_ip = false # private subnet + VPC endpoints = no public IP needed
+    assign_public_ip = false
   }
 
   load_balancer {
@@ -251,14 +203,12 @@ resource "aws_ecs_service" "backend" {
 
     deployment_circuit_breaker {
       enable   = true
-      rollback = true # automatically roll back on failed deployment
+      rollback = true
     }
   }
 
-  # ECS Fargate deployment — no data volumes to worry about
   lifecycle {
     ignore_changes = [
-      # CI/CD updates image_tag — don't let Terraform fight with it
       task_definition,
       desired_count
     ]
@@ -268,8 +218,6 @@ resource "aws_ecs_service" "backend" {
   depends_on = [aws_cloudwatch_log_group.backend]
 }
 
-# ── Auto Scaling ──────────────────────────────────────────────────────────────
-
 resource "aws_appautoscaling_target" "backend" {
   max_capacity       = var.max_tasks
   min_capacity       = var.min_tasks
@@ -278,7 +226,6 @@ resource "aws_appautoscaling_target" "backend" {
   service_namespace  = "ecs"
 }
 
-# CPU scaling — scale out when average CPU > 70% for 3 minutes
 resource "aws_appautoscaling_policy" "cpu" {
   name               = "${var.project}-${var.env}-cpu-scaling"
   policy_type        = "TargetTrackingScaling"
@@ -288,8 +235,8 @@ resource "aws_appautoscaling_policy" "cpu" {
 
   target_tracking_scaling_policy_configuration {
     target_value       = 70.0
-    scale_in_cooldown  = 300 # 5 min — avoid thrashing
-    scale_out_cooldown = 60  # 1 min — respond quickly to traffic spikes
+    scale_in_cooldown  = 300
+    scale_out_cooldown = 60
 
     predefined_metric_specification {
       predefined_metric_type = "ECSServiceAverageCPUUtilization"
@@ -297,7 +244,6 @@ resource "aws_appautoscaling_policy" "cpu" {
   }
 }
 
-# Memory scaling — scale out when average memory > 80%
 resource "aws_appautoscaling_policy" "memory" {
   name               = "${var.project}-${var.env}-memory-scaling"
   policy_type        = "TargetTrackingScaling"

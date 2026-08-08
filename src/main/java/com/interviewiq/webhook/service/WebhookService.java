@@ -102,10 +102,6 @@ public class WebhookService {
         markProcessed(event);
     }
 
-    // =========================================================================
-    // Private helpers
-    // =========================================================================
-
     private void processRazorpayPaymentCaptured(JsonNode root, WebhookEvent event) {
         JsonNode payment  = root.path("payload").path("payment").path("entity");
         String  orderId   = payment.path("order_id").asText();

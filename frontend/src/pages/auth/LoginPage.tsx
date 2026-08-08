@@ -1,7 +1,3 @@
-// =============================================================================
-// LoginPage.tsx — Employer login with email + password or Google OAuth
-// =============================================================================
-
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -46,7 +42,6 @@ export function LoginPage() {
     (location.state as { from?: { pathname: string } } | null)?.from
       ?.pathname ?? "/app/dashboard";
 
-  // Password visibility toggle
   const [showPassword, setShowPassword] = useState(false);
 
   const {
@@ -56,12 +51,7 @@ export function LoginPage() {
     formState: { errors },
   } = useForm<FormData>({ resolver: zodResolver(schema) });
 
-  // ── Email + password mutation ──────────────────────────────────────────────
-
   const mutation = useMutation({
-    // Explicit wrapper — never pass authApi.login directly as mutationFn.
-    // Multi-parameter function references can receive React Query's internal
-    // context object as a second argument, corrupting the optional `slug` param.
     mutationFn: (credentials: FormData) => authApi.login(credentials),
     onSuccess(data) {
       authStore.getState().setTokens(data.accessToken, data.refreshToken);
@@ -82,7 +72,6 @@ export function LoginPage() {
             replace: true,
           });
         } else if (error.status === 429) {
-          // IP lockout — show remaining seconds from Retry-After if available
           const retryAfter = error.retryAfterSeconds;
           const msg = retryAfter
             ? `Too many failed attempts. Try again in ${retryAfter} seconds.`
@@ -96,8 +85,6 @@ export function LoginPage() {
       }
     },
   });
-
-  // ── Google OAuth mutation ──────────────────────────────────────────────────
 
   const googleMutation = useMutation({
     mutationFn: (idToken: string) => authApi.googleLogin(idToken),

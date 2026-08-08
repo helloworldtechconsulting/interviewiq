@@ -1,18 +1,5 @@
 // =============================================================================
 // OnboardingPage.tsx — Register a new company + admin account
-//
-// Two registration paths:
-//   1. Google OAuth — one click, company name required, no OTP verification
-//   2. Email + password — full form, email OTP verification required
-//
-// For email+password: calls POST /api/v1/companies/register (companiesApi.onboard)
-// which atomically creates: company + first ADMIN user + empty wallet.
-// On success the backend returns { slug, email }. The slug is stored in
-// navigation state so VerifyEmailPage can call /api/v1/{slug}/auth/verify-email
-// with the correct company context.
-//
-// For Google: calls POST /api/v1/auth/google/register — no OTP step needed
-// because Google has already verified the email. Redirects to dashboard directly.
 // =============================================================================
 
 import { useState, type FormEvent } from "react";
@@ -69,8 +56,6 @@ type FormData = z.infer<typeof schema>;
 export function OnboardingPage() {
   const navigate = useNavigate();
 
-  // When a Google credential is received but we still need a company name,
-  // we temporarily hold the idToken here and show a mini-form.
   const [googleIdToken, setGoogleIdToken] = useState<string | null>(null);
   const [googleCompanyName, setGoogleCompanyName] = useState("");
 
@@ -80,8 +65,6 @@ export function OnboardingPage() {
     setError,
     formState: { errors },
   } = useForm<FormData>({ resolver: zodResolver(schema) });
-
-  // ── Email + password registration ─────────────────────────────────────────
 
   const mutation = useMutation({
     mutationFn: (data: FormData) =>
@@ -117,8 +100,6 @@ export function OnboardingPage() {
     },
   });
 
-  // ── Google registration ────────────────────────────────────────────────────
-
   const googleRegisterMutation = useMutation({
     mutationFn: ({ idToken, companyName }: { idToken: string; companyName: string }) =>
       authApi.googleRegister(idToken, companyName),
@@ -133,7 +114,6 @@ export function OnboardingPage() {
       } else {
         toast.error("Google registration failed. Please try again.");
       }
-      // Reset Google flow so user can retry
       setGoogleIdToken(null);
       setGoogleCompanyName("");
     },
@@ -144,7 +124,6 @@ export function OnboardingPage() {
   }
 
   function handleGoogleCredential(idToken: string) {
-    // We have the token but still need a company name
     setGoogleIdToken(idToken);
   }
 
@@ -158,8 +137,6 @@ export function OnboardingPage() {
   }
 
   const isLoading = mutation.isPending || googleRegisterMutation.isPending;
-
-  // ── Google company-name collection sub-form ────────────────────────────────
 
   if (googleIdToken) {
     return (
@@ -207,8 +184,6 @@ export function OnboardingPage() {
       </Card>
     );
   }
-
-  // ── Main registration form ─────────────────────────────────────────────────
 
   return (
     <Card className="w-full max-w-md">

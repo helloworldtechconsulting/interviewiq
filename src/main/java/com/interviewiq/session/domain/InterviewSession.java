@@ -47,11 +47,6 @@ public class InterviewSession {
     @Column(nullable = false, updatable = false)
     private UUID candidateId;
 
-    /**
-     * Target interview time set by the recruiter at session creation.
-     * Shown to the candidate: "Your interview is scheduled for April 20 at 3:00 PM IST".
-     * NULL for sessions created before V033. Added V033.
-     */
     private OffsetDateTime scheduledAt;
 
     /** BCrypt hash of the invite token. Raw token is never stored. */
@@ -82,43 +77,20 @@ public class InterviewSession {
 
     private OffsetDateTime endedAt;
 
-    /**
-     * SHA-256 hash of the ephemeral WebSocket room token.
-     * Issued when the session transitions to STARTED; raw token never persisted. Added V032.
-     */
     @Column(unique = true, length = 255)
     private String roomTokenHash;
 
-    /** Expiry for the room token. Set/null alongside roomTokenHash. Added V032. */
     private OffsetDateTime roomTokenExpiresAt;
 
-    /**
-     * Actual interview duration in seconds, computed from (endedAt − startedAt) at session-end.
-     * Stored explicitly to avoid recomputing on every query. Added V032.
-     */
     private Integer durationSeconds;
 
-    /**
-     * S3 object key for the session video recording (WebM).
-     * Uploaded by the browser via pre-signed PUT URL at session end.
-     * S3 lifecycle auto-deletes after 7 days. Added V032.
-     */
     @Column(name = "recording_s3_key", length = 512)
     private String recordingS3Key;
 
-    /**
-     * Denormalised anti-cheat summary written by the evaluation pipeline after
-     * the session ends. JSON array of flag objects. Added V032.
-     * Structure: [{"type":"TAB_SWITCH","count":2,"firstOccurrence":"..."}]
-     */
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "proctoring_flags_jsonb", columnDefinition = "jsonb")
     private String proctoringFlagsJsonb;
 
-    /**
-     * Timestamp set when the session transitions to CANCELLED.
-     * Required for cancellation analytics and refund eligibility windows. Added V032.
-     */
     private OffsetDateTime cancelledAt;
 
     /** Structured error code for ERROR state. E.g. BOT_JOIN_TIMEOUT. */

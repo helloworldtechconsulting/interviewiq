@@ -1,39 +1,12 @@
-// =============================================================================
-// GoogleSignInButton.tsx — Reusable Google OAuth sign-in button
-//
-// Wraps @react-oauth/google's <GoogleLogin> component and normalises the
-// credential response into a plain callback so callers never touch the
-// Google library API directly.
-//
-// Usage:
-//   <GoogleSignInButton
-//     onSuccess={(idToken) => /* call your API */}
-//     onError={() => toast.error("Google sign-in failed")}
-//     text="signin_with"   // or "signup_with" | "continue_with" | "signin"
-//   />
-// =============================================================================
-
 import { GoogleLogin, type CredentialResponse } from "@react-oauth/google";
 
 interface GoogleSignInButtonProps {
-  /** Called with the raw Google ID token JWT string on successful sign-in. */
   onSuccess: (idToken: string) => void;
-  /** Called when the Google sign-in flow fails or is cancelled. */
   onError?: () => void;
-  /** Button text variant. Defaults to "signin_with". */
   text?: "signin_with" | "signup_with" | "continue_with" | "signin";
-  /** Whether the button should be disabled (e.g. while a mutation is pending). */
   disabled?: boolean;
 }
 
-/**
- * Renders the official Google sign-in button using the Google Identity Services
- * library. The button handles the OAuth popup / redirect flow internally and
- * fires {@link onSuccess} with the verified ID token credential string.
- *
- * If {@code VITE_GOOGLE_CLIENT_ID} is empty (not configured), the button renders
- * in a disabled state with a placeholder message — no runtime error is thrown.
- */
 export function GoogleSignInButton({
   onSuccess,
   onError,
@@ -74,9 +47,6 @@ export function GoogleSignInButton({
     />
   );
 }
-
-// ── Inline Google "G" logo SVG ────────────────────────────────────────────────
-// Used only in the disabled state fallback above.
 
 function GoogleIcon({ className }: { className?: string }) {
   return (

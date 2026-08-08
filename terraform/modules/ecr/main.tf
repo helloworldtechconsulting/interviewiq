@@ -1,13 +1,6 @@
-# =============================================================================
-# modules/ecr/main.tf
-#
-# ECR repository for Spring Boot backend Docker images.
-# Image scanning enabled — blocks deployment of vulnerable images.
-# =============================================================================
-
 resource "aws_ecr_repository" "backend" {
   name                 = "${var.project}/backend"
-  image_tag_mutability = "MUTABLE" # allows :latest; use IMMUTABLE + SHA tags in prod
+  image_tag_mutability = "MUTABLE"
 
   encryption_configuration {
     encryption_type = "KMS"
@@ -15,7 +8,7 @@ resource "aws_ecr_repository" "backend" {
   }
 
   image_scanning_configuration {
-    scan_on_push = true # triggers Snyk/Amazon Inspector scan on every push
+    scan_on_push = true
   }
 
   tags = merge(var.tags, { Name = "${var.project}-backend-ecr" })
@@ -36,8 +29,6 @@ resource "aws_ecr_repository" "frontend" {
 
   tags = merge(var.tags, { Name = "${var.project}-frontend-ecr" })
 }
-
-# ── Lifecycle Policy — keep last 10 tagged images, expire untagged after 1 day ─
 
 resource "aws_ecr_lifecycle_policy" "backend" {
   repository = aws_ecr_repository.backend.name
@@ -74,7 +65,6 @@ resource "aws_ecr_lifecycle_policy" "frontend" {
   policy     = aws_ecr_lifecycle_policy.backend.policy
 }
 
-# ── Cross-account pull (optional — for prod pulling from shared ECR) ──────────
 resource "aws_ecr_repository_policy" "backend" {
   count      = length(var.allowed_account_ids) > 0 ? 1 : 0
   repository = aws_ecr_repository.backend.name

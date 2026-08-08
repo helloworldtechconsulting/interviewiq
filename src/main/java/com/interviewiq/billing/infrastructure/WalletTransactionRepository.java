@@ -28,17 +28,6 @@ public interface WalletTransactionRepository extends JpaRepository<WalletTransac
     List<WalletTransaction> findAllByWalletIdAndTransactionTypeAndStatus(
             UUID walletId, TransactionType type, TransactionStatus status);
 
-    /**
-     * A page of PENDING RESERVATION transactions whose session has reached a given
-     * status (EXPIRED) — used by {@code StrandedReservationCleanupRunner} to find
-     * reservations stranded by the pre-fix expiry job.
-     *
-     * <p>The session filter is applied in the query (via a subquery over
-     * {@link com.interviewiq.session.domain.InterviewSession}) so that every returned
-     * row is genuinely releasable. That lets the caller iterate by always re-fetching
-     * the first page: each released reservation leaves the PENDING set and the result
-     * shrinks to empty, with no non-releasable rows left clogging the page.
-     */
     @Query("SELECT t FROM WalletTransaction t "
             + "WHERE t.transactionType = :type AND t.status = :status "
             + "AND t.sessionId IN (SELECT s.id FROM InterviewSession s WHERE s.status = :sessionStatus)")
