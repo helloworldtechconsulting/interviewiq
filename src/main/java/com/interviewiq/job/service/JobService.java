@@ -12,7 +12,9 @@ import com.interviewiq.shared.domain.PipelineStatus;
 import com.interviewiq.shared.exception.ResourceNotFoundException;
 import com.interviewiq.shared.exception.ValidationException;
 import com.interviewiq.shared.security.SecurityContext;
+import com.interviewiq.storage.domain.UploadKind;
 import com.interviewiq.storage.service.StorageService;
+import com.interviewiq.storage.service.UploadKeyService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -47,11 +49,14 @@ public class JobService {
 
     private final JobOpeningRepository jobOpeningRepository;
     private final StorageService       storageService;
+    private final UploadKeyService     uploadKeyService;
 
     public JobService(JobOpeningRepository jobOpeningRepository,
-                      StorageService storageService) {
+                      StorageService storageService,
+                      UploadKeyService uploadKeyService) {
         this.jobOpeningRepository = jobOpeningRepository;
         this.storageService       = storageService;
+        this.uploadKeyService     = uploadKeyService;
     }
 
     // =========================================================================
@@ -134,8 +139,8 @@ public class JobService {
      */
     public JdUploadUrlResponse generateJdUploadUrl(UUID jobId, String contentType) {
         JobOpening job = requireJob(jobId);
-        String objectKey = "jd/" + job.getCompanyId() + "/" + jobId + "/" +
-                           UUID.randomUUID() + resolveExtension(contentType);
+        String objectKey = uploadKeyService.deriveKey(
+                UploadKind.JOB_DESCRIPTION, job.getCompanyId(), jobId, contentType);
         String uploadUrl = storageService.generatePresignedUploadUrl(objectKey, contentType, JD_UPLOAD_EXPIRY);
         return new JdUploadUrlResponse(uploadUrl, objectKey);
     }
@@ -143,18 +148,23 @@ public class JobService {
     /**
      * Records the S3 key after the client confirms the JD upload is complete,
      * then resets extraction status to PENDING so the background worker picks it up.
+     *
+     * <p>The supplied key is validated against this company and job, and the stored
+     * object is checked against the 10 MB ceiling and the PDF/DOCX allow-list, before
+     * anything is persisted (PRD v2.1 §7.1.3).
      */
     @Transactional
     public JobResponse confirmJdUploaded(UUID jobId, String objectKey) {
         JobOpening job = requireJob(jobId);
-        if (objectKey == null || objectKey.isBlank()) {
-            throw new ValidationException("Object key must not be blank.");
-        }
-        job.setJdS3Key(objectKey);
+        String ownedKey = uploadKeyService.validateOwnedKey(
+                UploadKind.JOB_DESCRIPTION, job.getCompanyId(), jobId, objectKey);
+        storageService.verifyUploadedObject(ownedKey, UploadKind.JOB_DESCRIPTION);
+
+        job.setJdS3Key(ownedKey);
         job.setJdExtractionStatus(PipelineStatus.PENDING);
         job.setJdText(null);
         jobOpeningRepository.save(job);
-        log.info("JD upload confirmed: jobId={} key={}", jobId, objectKey);
+        log.info("JD upload confirmed: jobId={} key={}", jobId, ownedKey);
         return JobResponse.from(job);
     }
 
@@ -172,12 +182,4 @@ public class JobService {
     // Private helpers
     // =========================================================================
 
-    private String resolveExtension(String contentType) {
-        if (contentType == null) return "";
-        return switch (contentType) {
-            case "application/pdf" -> ".pdf";
-            case "application/vnd.openxmlformats-officedocument.wordprocessingml.document" -> ".docx";
-            default -> "";
-        };
-    }
 }

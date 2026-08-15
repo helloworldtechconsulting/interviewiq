@@ -124,15 +124,21 @@ app:
     jwt:
       private-key-pem: ""
       public-key-pem: ""
-      access-token-expiration: 15m
-      refresh-token-expiration: 30d
+      access-token-expiration: 60m   # PRD v2.1 §7.1.1 — 60-minute access JWT
+      refresh-token-expiration: 7d   # PRD v2.1 §7.1.1 — 7-day refresh, HTTP-only cookie
     invite:
       secret: ""
-      expiration: 7d
+      expiration: 72h                # PRD v2.1 §7.1.2 — invite links valid 72 hours
     google:
       # OAuth 2.0 Client ID from Google Cloud Console.
       # Override per environment — inject in prod as APP_SECURITY_GOOGLE_CLIENT_ID.
       client-id: ""
+    cors:
+      # PRD v2.1 §7.1.3 — CORS restricted to the configured frontend origins.
+      # Empty here on purpose: localhost is declared in the local profile, and
+      # staging/prod inject APP_SECURITY_CORS_ALLOWED_ORIGINS. There is no
+      # wildcard fallback — an unlisted origin is refused.
+      allowed-origins: []
     login-attempt:
       max-failures: 5          # lock after this many failed logins from one IP
       window-duration: PT1M    # sliding window for counting failures
@@ -151,7 +157,7 @@ app:
     ses-from-address: noreply@interviewiq.ai
     use-local-stub: false
   billing:
-    session-cost-paise: 5000   # ₹50 per interview session (override per-environment)
+    session-cost-paise: 10000  # ₹100 per completed interview, flat across all duration tiers (PRD v2.1 §7.8.1)
     strand-cleanup:
       # One-off remediation for reservations stranded by the pre-fix SessionExpiryJob.
       # Keep false. Enable for exactly one deploy to drain stranded reservedPaise

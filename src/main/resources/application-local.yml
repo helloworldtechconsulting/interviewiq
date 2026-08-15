@@ -81,6 +81,11 @@ app:
       refresh-token-expiration: 7d
     invite:
       secret: ""      # auto-generate locally
+    cors:
+      # The Vite dev server. Explicit even locally — there is no wildcard path.
+      allowed-origins:
+        - http://localhost:3000
+        - http://localhost:5173
 
   # Razorpay — test mode key prefix; replace with live key in prod
   razorpay:

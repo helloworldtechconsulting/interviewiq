@@ -22,6 +22,9 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import java.time.Duration;
 
@@ -85,10 +88,14 @@ public class SecurityConfig {
 
     private final TokenService tokenService;
     private final ObjectMapper objectMapper;
+    private final SecurityProperties securityProperties;
 
-    public SecurityConfig(TokenService tokenService, ObjectMapper objectMapper) {
+    public SecurityConfig(TokenService tokenService,
+                          ObjectMapper objectMapper,
+                          SecurityProperties securityProperties) {
         this.tokenService = tokenService;
         this.objectMapper = objectMapper;
+        this.securityProperties = securityProperties;
     }
 
     // =========================================================================
@@ -110,6 +117,7 @@ public class SecurityConfig {
         return http
                 .securityMatcher("/api/v1/candidate/**")
                 .csrf(AbstractHttpConfigurer::disable)
+                .cors(c -> c.configurationSource(corsConfigurationSource()))
                 .sessionManagement(sm ->
                         sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth ->
@@ -158,6 +166,7 @@ public class SecurityConfig {
                 .securityMatcher("/api/v1/**", "/actuator/**", "/v3/api-docs/**",
                         "/swagger-ui/**", "/swagger-ui.html")
                 .csrf(AbstractHttpConfigurer::disable)
+                .cors(c -> c.configurationSource(corsConfigurationSource()))
                 .sessionManagement(sm ->
                         sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
@@ -196,6 +205,37 @@ public class SecurityConfig {
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder(12);
+    }
+
+    /**
+     * CORS policy shared by both chains, built from {@code app.security.cors}.
+     *
+     * <p>PRD v2.1 §7.1.3 makes an absent or permissive CORS policy a launch
+     * blocker. Origins are an explicit allow-list — there is no wildcard path
+     * through this method. {@code allowCredentials} is on because the refresh
+     * token is carried in an HTTP-only cookie (§7.1.1), and the CORS
+     * specification forbids combining credentials with an {@code *} origin, so
+     * enumerating origins is the only configuration that can work.
+     *
+     * <p>An empty allow-list yields a policy that permits no cross-origin
+     * request. That is the correct default: same-origin deployments need
+     * nothing, and anything else must be declared.
+     */
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+        SecurityProperties.Cors cors = securityProperties.getCors();
+
+        CorsConfiguration config = new CorsConfiguration();
+        config.setAllowedOrigins(cors.getAllowedOrigins());
+        config.setAllowedMethods(cors.getAllowedMethods());
+        config.setAllowedHeaders(cors.getAllowedHeaders());
+        config.setExposedHeaders(cors.getExposedHeaders());
+        config.setAllowCredentials(true);
+        config.setMaxAge(cors.getMaxAge());
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/api/**", config);
+        return source;
     }
 
     // =========================================================================

@@ -26,7 +26,7 @@ spring:
     password: ${DB_PASSWORD}
     hikari:
       pool-name:            InterviewIQ-Prod-Pool
-      maximum-pool-size:    20
+      maximum-pool-size:    10   # PRD v2.1 §8 — 10 per pod; 6 web + 4 worker stays inside a small managed instance
       minimum-idle:         5
       idle-timeout:         600000   # 10 min
       max-lifetime:         1800000  # 30 min
@@ -88,20 +88,25 @@ app:
       # RSA keys injected as env vars — REQUIRED in production
       private-key-pem: ${APP_SECURITY_JWT_PRIVATE_KEY_PEM}
       public-key-pem:  ${APP_SECURITY_JWT_PUBLIC_KEY_PEM}
-      access-token-expiration: 15m
-      refresh-token-expiration: 30d
+      access-token-expiration: 60m
+      refresh-token-expiration: 7d
     invite:
       # HMAC secret — REQUIRED in production; min 32 characters
       secret: ${APP_SECURITY_INVITE_SECRET}
-      expiration: 7d
+      expiration: 72h
+    cors:
+      # Comma-separated exact origins, e.g. https://app.interviewiq.in
+      # REQUIRED — the SPA is served from a different origin than the API.
+      allowed-origins: ${APP_SECURITY_CORS_ALLOWED_ORIGINS}
+
+  frontend:
+    # Every emailed link (invite, booking confirmation, password reset) is built
+    # from this. REQUIRED in production — a wrong value silently emails dead links.
+    base-url: ${APP_FRONTEND_BASE_URL}
 
   razorpay:
     key-id:     ${RAZORPAY_KEY_ID}
     key-secret: ${RAZORPAY_KEY_SECRET}
-
-  recall:
-    api-key:         ${RECALL_API_KEY}
-    webhook-secret:  ${RECALL_WEBHOOK_SECRET}
 
   aws:
     region:     ${AWS_REGION:ap-south-1}
