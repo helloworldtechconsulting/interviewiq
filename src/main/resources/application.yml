@@ -180,6 +180,13 @@ app:
   schedulers:
     enabled: true
 
+  # ── Interview room ────────────────────────────────────────────────────────
+  room:
+    timer-sweep:
+      # Runs on every pod including web pods, because only the pod holding a
+      # candidate's socket can push a timer warning to them.
+      enabled: true
+
   # ── Candidate-driven scheduling (PRD v2.1 §7.4) ───────────────────────────
   # No business hours, no blackout periods, no quiet-hours setting: availability
   # is genuinely 24×7 and capacity is the only constraint. `invite-buffer` is
