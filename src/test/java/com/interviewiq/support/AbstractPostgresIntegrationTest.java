@@ -28,7 +28,8 @@ public abstract class AbstractPostgresIntegrationTest {
 
     @Container
     static final PostgreSQLContainer<?> POSTGRES =
-            new PostgreSQLContainer<>("postgres:15-alpine")
+            // PostgreSQL 16, matching the managed version the PRD specifies (§9).
+            new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("interviewiq_test")
                     .withUsername("test")
                     .withPassword("test");

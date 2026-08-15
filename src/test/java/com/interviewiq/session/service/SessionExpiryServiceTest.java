@@ -58,13 +58,13 @@ class SessionExpiryServiceTest {
     @Test
     void nonInvitedSession_isLeftUntouched() {
         UUID sessionId = UUID.randomUUID();
-        InterviewSession started = session(sessionId, UUID.randomUUID(), SessionStatus.STARTED);
+        InterviewSession started = session(sessionId, UUID.randomUUID(), SessionStatus.IN_PROGRESS);
         when(sessionRepository.findById(sessionId)).thenReturn(Optional.of(started));
 
         boolean acted = service().expireAndRelease(sessionId);
 
         assertThat(acted).isFalse();
-        assertThat(started.getStatus()).isEqualTo(SessionStatus.STARTED);
+        assertThat(started.getStatus()).isEqualTo(SessionStatus.IN_PROGRESS);
         verify(sessionRepository, never()).save(started);
         verifyNoInteractions(walletService);
     }

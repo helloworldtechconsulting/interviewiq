@@ -87,6 +87,15 @@ public class JobOpening {
     @Column(nullable = false, length = 50)
     private JobStatus status = JobStatus.ACTIVE;
 
+    /**
+     * How long interviews for this opening run, and therefore how many questions
+     * are generated and how many capacity buckets a booking occupies
+     * (PRD v2.1 §7.2.1). Defaults to Standard.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private DurationTier durationTier = DurationTier.defaultTier();
+
     @Column(nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 
@@ -159,4 +168,7 @@ public class JobOpening {
     public String toString() {
         return "JobOpening{id=" + id + ", companyId=" + companyId + ", title='" + title + "'}";
     }
+
+    public DurationTier getDurationTier() { return durationTier; }
+    public void setDurationTier(DurationTier durationTier) { this.durationTier = durationTier; }
 }

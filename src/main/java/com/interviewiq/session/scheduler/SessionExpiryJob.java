@@ -22,7 +22,7 @@ import java.util.List;
  *
  * <p><b>Why not a bulk UPDATE:</b> a billing reservation is created the moment a
  * session is persisted in INVITED state ({@code SessionService.create}) — not when
- * it moves to STARTED. A single {@code UPDATE ... SET status = EXPIRED} would flip
+ * it moves to IN_PROGRESS. A single {@code UPDATE ... SET status = EXPIRED} would flip
  * the rows without ever calling {@link com.interviewiq.billing.service.WalletService#releaseFunds},
  * permanently stranding each session's cost in {@code reservedPaise}. Instead this job
  * fetches stale sessions a page at a time and expires-and-releases each one in its own
