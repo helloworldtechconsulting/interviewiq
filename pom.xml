@@ -189,6 +189,19 @@
             <version>4.3.4</version>
         </dependency>
 
+        <!-- ── WebSocket — the interview room's signalling channel ─── -->
+        <!--    PRD v2.1 §7.5.2: one connection, eight events, carrying only text
+                and control events. No media crosses it — getUserMedia,
+                MediaRecorder, SpeechSynthesis and SpeechRecognition all run in
+                the candidate's browser, and the 480p recording uploads
+                browser-to-storage by pre-signed URL without touching this
+                server. That is what makes one small pod capable of carrying
+                dozens of simultaneous interviews.                              -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-websocket</artifactId>
+        </dependency>
+
         <!-- ── Micrometer Prometheus registry ───────────────── -->
         <dependency>
             <groupId>io.micrometer</groupId>

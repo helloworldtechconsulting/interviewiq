@@ -163,8 +163,8 @@ public class SecurityConfig {
                 onboardRateLimitRefillDuration, objectMapper);
 
         return http
-                .securityMatcher("/api/v1/**", "/actuator/**", "/v3/api-docs/**",
-                        "/swagger-ui/**", "/swagger-ui.html")
+                .securityMatcher("/api/v1/**", "/actuator/**", "/internal/**",
+                        "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html")
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(c -> c.configurationSource(corsConfigurationSource()))
                 .sessionManagement(sm ->
@@ -176,6 +176,12 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/companies/check-slug").permitAll()
                         .requestMatchers("/api/v1/webhooks/**").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/info").permitAll()
+                        // Kubernetes probes and the preStop drain hook. Reachable
+                        // only from inside the cluster — /internal/** is not
+                        // exposed through the ingress (see the workload module),
+                        // which is what keeps an unauthenticated drain endpoint
+                        // from being a denial-of-service lever.
+                        .requestMatchers("/internal/**").permitAll()
                         // OpenAPI / Swagger UI — permit in all environments; restrict in prod via network policy
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         .anyRequest().authenticated())
