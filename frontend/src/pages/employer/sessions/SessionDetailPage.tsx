@@ -466,6 +466,13 @@ export function SessionDetailPage() {
                 />
               )}
 
+              <ProctoringPanel sessionId={sessionId!} />
+
+              <EmployerNotesPanel
+                sessionId={sessionId!}
+                initialNotes={evaluation.employerNotes ?? ""}
+              />
+
               {/* Question breakdown — legacy reports only */}
               {!evaluation.evidence && evaluation.questions.length > 0 && (
                 <Card>
@@ -542,5 +549,127 @@ export function SessionDetailPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+// =============================================================================
+// Proctoring (INTIQ-29)
+// =============================================================================
+
+/**
+ * What the browser noticed during the interview.
+ *
+ * Rendered as a plain chronological list with no severity, no score and no
+ * verdict. That is a deliberate refusal: these signals are weak individually —
+ * a tab switch might be someone checking the time, a camera drop might be a
+ * loose cable — and turning them into "suspected cheating" would be the product
+ * making an accusation about a person, with their job at stake, on evidence
+ * that does not support one. The recruiter sees what happened and decides.
+ *
+ * Chronological rather than grouped by type, because three tab switches in the
+ * last two minutes reads very differently from three spread across an hour, and
+ * only the ordering shows that.
+ */
+function ProctoringPanel({ sessionId }: { sessionId: string }) {
+  const { data: events = [], isLoading } = useQuery({
+    queryKey: ["sessions", sessionId, "proctoring"],
+    queryFn: () => sessionsApi.getProctoringEvents(sessionId),
+  });
+
+  if (isLoading || events.length === 0) {
+    return null;
+  }
+
+  return (
+    <Card className="print-keep-together">
+      <CardHeader>
+        <CardTitle className="text-base">During the interview</CardTitle>
+      </CardHeader>
+      <Separator />
+      <CardContent className="space-y-2 pt-4">
+        <p className="text-sm text-muted-foreground">
+          Things the browser noticed. These are observations, not conclusions —
+          a tab switch might be someone checking the time.
+        </p>
+        {events.map((e) => (
+          <div key={e.id} className="flex items-center gap-3 rounded-md border p-2 text-sm">
+            <span className="font-medium">
+              {e.eventType === "TAB_SWITCH" ? "Switched away from the tab" : "Camera turned off"}
+            </span>
+            <span className="ml-auto text-xs text-muted-foreground">
+              {new Date(e.occurredAt).toLocaleTimeString()}
+            </span>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+// =============================================================================
+// Employer notes (INTIQ-29)
+// =============================================================================
+
+/**
+ * The recruiter's own notes on a report.
+ *
+ * Never sent to a model. These are the recruiter's words about a candidate, and
+ * feeding them back into scoring would let an opinion formed after the
+ * interview influence the evaluation of it — which is exactly the contamination
+ * an advisory score is supposed to avoid.
+ */
+function EmployerNotesPanel({
+  sessionId,
+  initialNotes,
+}: {
+  sessionId: string;
+  initialNotes: string;
+}) {
+  const [notes, setNotes] = useState(initialNotes);
+  const [saved, setSaved] = useState(true);
+
+  const mutation = useMutation({
+    mutationFn: () => sessionsApi.saveNotes(sessionId, notes),
+    onSuccess() {
+      setSaved(true);
+      toast.success("Notes saved.");
+    },
+    onError() {
+      toast.error("Could not save your notes.");
+    },
+  });
+
+  return (
+    <Card className="print-keep-together">
+      <CardHeader>
+        <CardTitle className="text-base">Your notes</CardTitle>
+      </CardHeader>
+      <Separator />
+      <CardContent className="space-y-3 pt-4">
+        <textarea
+          value={notes}
+          onChange={(e) => {
+            setNotes(e.target.value);
+            setSaved(false);
+          }}
+          rows={4}
+          placeholder="What you thought, what to probe in round two, who else should see this…"
+          className="w-full rounded-md border bg-background p-3 text-sm"
+        />
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-xs text-muted-foreground">
+            Visible to your team, never to the candidate, and never used in scoring.
+          </p>
+          <Button
+            size="sm"
+            className="no-print"
+            onClick={() => mutation.mutate()}
+            disabled={saved || mutation.isPending}
+          >
+            {saved ? "Saved" : "Save notes"}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }

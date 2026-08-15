@@ -60,3 +60,46 @@
     -moz-osx-font-smoothing: grayscale;
   }
 }
+
+/* ============================================================================
+   Print — the evaluation report (INTIQ-29)
+ 
+   A hiring manager who is not an InterviewIQ user still ends up reading these,
+   usually as a PDF someone sent them. So the printed page has to stand alone:
+   no navigation, no buttons they cannot press, and every score legible in
+   black and white rather than by colour alone.
+   ========================================================================== */
+@media print {
+  /* Chrome drops background colours by default, which turns a colour-coded
+     score badge into an unreadable pale shape. Force them back. */
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .no-print,
+  nav,
+  aside,
+  button {
+    display: none !important;
+  }
+
+  /* Cards stack on paper; the on-screen shadows just render as grey smudges. */
+  .print-plain,
+  [class*="rounded-"] {
+    box-shadow: none !important;
+    border-color: #d4d4d8 !important;
+  }
+
+  /* A question and its answer splitting across a page break is the one thing
+     that makes these documents hard to read. */
+  .print-keep-together {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  body {
+    background: #fff;
+    font-size: 11pt;
+  }
+}
