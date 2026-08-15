@@ -163,6 +163,18 @@ public class CapacityService {
     }
 
     /**
+     * Buckets in a range that already carry occupancy.
+     *
+     * <p>Only occupied buckets exist as rows, so the caller can treat anything
+     * absent from the result as empty. That is what lets the available-times
+     * query evaluate a 30-day horizon from one read.
+     */
+    @Transactional(readOnly = true)
+    public List<CapacityBucket> loadRange(OffsetDateTime from, OffsetDateTime until) {
+        return bucketRepository.findRange(from, until);
+    }
+
+    /**
      * Whether an interview starting at this instant would fit.
      *
      * <p>Reads without locking — this answers "should we offer this time?", and a
