@@ -275,6 +275,8 @@ export interface Job {
   description: string | null;
   experienceMin: number | null;
   experienceMax: number | null;
+  /** Interview length for this opening (PRD v2.1 §7.2.1). Defaults to STANDARD. */
+  durationTier: DurationTier;
   status: JobStatus;
   createdAt: string;
   updatedAt: string;
@@ -282,6 +284,7 @@ export interface Job {
 
 export interface CreateJobRequest {
   title: string;
+  durationTier?: DurationTier;
   department?: string;
   locationType?: LocationType;
   employmentType?: EmploymentType;
@@ -292,6 +295,7 @@ export interface CreateJobRequest {
 
 export interface UpdateJobRequest {
   title?: string;
+  durationTier?: DurationTier;
   department?: string;
   locationType?: LocationType;
   employmentType?: EmploymentType;
@@ -422,6 +426,43 @@ export interface EvaluationQuestion {
   feedback?: string;
 }
 
+/** One dimension's narrative, with the answers it cites (PRD v2.1 §7.6). */
+export interface DimensionEvidence {
+  narrative: string;
+  /** Answer indexes supporting the claim. A claim with none is a defect. */
+  citedAnswerIndexes: number[];
+}
+
+export interface PerQuestionEvidence {
+  questionIndex: number;
+  score?: number;
+  narrative: string;
+}
+
+/**
+ * Per-question narrative evidence (PRD v2.1 §7.6).
+ *
+ * Validated server-side before the report is persisted — "a report whose
+ * narrative does not cite answers is a defect, not a stylistic preference".
+ */
+export interface Evidence {
+  overallSummary: string;
+  dimensions: Record<string, DimensionEvidence>;
+  perQuestion: PerQuestionEvidence[];
+}
+
+/** One answer as stored, for rendering the transcript alongside the evidence. */
+export interface SessionAnswer {
+  questionIndex: number;
+  questionText: string;
+  /** EMPLOYER-sourced questions are labelled on the report (§7.5.8). */
+  questionSource: QuestionSource;
+  transcriptText: string | null;
+  score: number | null;
+  skipped: boolean;
+  isFollowUp: boolean;
+}
+
 export interface Evaluation {
   id: string;
   sessionId: string;
@@ -431,6 +472,11 @@ export interface Evaluation {
   improvements: string[];
   recommendation: "HIRE" | "HOLD" | "REJECT";
   questions: EvaluationQuestion[];
+  /** The v2.1 evidence payload. Absent on reports generated before v2.1. */
+  evidence?: Evidence;
+  answers?: SessionAnswer[];
+  /** True when the candidate answered some but not all questions (§7.5.7). */
+  partial?: boolean;
   transcript?: string;
   createdAt: string;
 }

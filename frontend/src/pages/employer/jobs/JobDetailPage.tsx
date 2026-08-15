@@ -26,6 +26,9 @@ import { queryKeys } from "@/lib/queryKeys";
 import { AppError } from "@/api/client";
 import type { JobStatus, LocationType, EmploymentType } from "@/types";
 import { PageHeader } from "@/components/common/PageHeader";
+import { QuestionBankPanel } from "./QuestionBankPanel";
+import { DurationTierSelect } from "@/components/common/DurationTierSelect";
+import type { DurationTier } from "@/types";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { EmptyState } from "@/components/common/EmptyState";
 import { Button } from "@/components/ui/button";
@@ -135,6 +138,22 @@ export function JobDetailPage() {
   const currentStatus = watch("status");
 
   // ── Mutations ──────────────────────────────────────────────────────────────
+
+  // Separate from the edit form: the tier is changed with one click from the
+  // sidebar rather than by entering edit mode on the whole job.
+  const tierMutation = useMutation({
+    mutationFn: (durationTier: DurationTier) =>
+      jobsApi.update(jobId!, { durationTier }),
+    onSuccess() {
+      toast.success("Interview length updated.");
+      void qc.invalidateQueries({ queryKey: queryKeys.jobs.detail(jobId!) });
+    },
+    onError(error) {
+      toast.error(
+        error instanceof AppError ? error.message : "Could not change the interview length.",
+      );
+    },
+  });
 
   const updateMutation = useMutation({
     mutationFn: (data: EditForm) =>
@@ -509,6 +528,9 @@ export function JobDetailPage() {
             </CardContent>
           </Card>
 
+          {/* ── The employer's own questions (§7.5.8) ─────────────────────── */}
+          <QuestionBankPanel jobId={jobId!} />
+
           {/* ── Candidates list ──────────────────────────────────────────────── */}
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
@@ -619,6 +641,21 @@ export function JobDetailPage() {
                   />
                 </div>
               )}
+            </CardContent>
+          </Card>
+
+          {/* ── Interview length (§7.2.1) ─────────────────────────────────── */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Interview length</CardTitle>
+            </CardHeader>
+            <Separator />
+            <CardContent className="pt-4">
+              <DurationTierSelect
+                value={job.durationTier ?? "STANDARD"}
+                onChange={(tier) => tierMutation.mutate(tier)}
+                disabled={tierMutation.isPending}
+              />
             </CardContent>
           </Card>
 
