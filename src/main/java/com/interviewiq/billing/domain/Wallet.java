@@ -70,6 +70,19 @@ public class Wallet {
     @Column(nullable = false)
     private Long version = 0L;
 
+    /**
+     * When the low-balance email was last sent, or null if the balance has not
+     * been low since the last top-up.
+     *
+     * <p>Cleared on top-up rather than on crossing back above the threshold, so
+     * a company that tops up and later drops low again is warned again — while a
+     * company that simply sits below the line is not emailed on every settle.
+     * Without this the alert would fire once per completed interview, which is
+     * how a useful warning becomes a filtered one.
+     */
+    @Column(name = "low_balance_notified_at")
+    private OffsetDateTime lowBalanceNotifiedAt;
+
     @Column(nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 
@@ -127,6 +140,9 @@ public class Wallet {
 
     public Long getVersion() { return version; }
     public void setVersion(Long version) { this.version = version; }
+
+    public OffsetDateTime getLowBalanceNotifiedAt() { return lowBalanceNotifiedAt; }
+    public void setLowBalanceNotifiedAt(OffsetDateTime v) { this.lowBalanceNotifiedAt = v; }
 
     public OffsetDateTime getCreatedAt() { return createdAt; }
     public OffsetDateTime getUpdatedAt() { return updatedAt; }

@@ -66,6 +66,42 @@ public class SchedulingProperties {
      */
     private Duration questionGenerationSla = Duration.ofMinutes(30);
 
+    /**
+     * How late a candidate may arrive before the session is marked
+     * {@code NO_SHOW} (§7.4.5).
+     *
+     * <p>Fifteen minutes is generous on purpose. The cost of waiting is a
+     * capacity bucket held slightly longer; the cost of being too strict is a
+     * candidate who took time off work, hit traffic, and finds their interview
+     * gone — and a recruiter who loses a real applicant to a timer.
+     */
+    private Duration noShowGrace = Duration.ofMinutes(15);
+
+    /**
+     * How far ahead of the start time each reminder is sent.
+     *
+     * <p>Configurable rather than hardcoded because the right cadence is an
+     * empirical question about completion rate, and completion rate is what the
+     * product is billed on.
+     */
+    private Duration firstReminderLead  = Duration.ofHours(24);
+    private Duration secondReminderLead = Duration.ofHours(1);
+
+    /** Batch size for the reminder and no-show sweeps. */
+    private int sweepBatchSize = 100;
+
+    public Duration getNoShowGrace() { return noShowGrace; }
+    public void setNoShowGrace(Duration noShowGrace) { this.noShowGrace = noShowGrace; }
+
+    public Duration getFirstReminderLead() { return firstReminderLead; }
+    public void setFirstReminderLead(Duration v) { this.firstReminderLead = v; }
+
+    public Duration getSecondReminderLead() { return secondReminderLead; }
+    public void setSecondReminderLead(Duration v) { this.secondReminderLead = v; }
+
+    public int getSweepBatchSize() { return sweepBatchSize; }
+    public void setSweepBatchSize(int sweepBatchSize) { this.sweepBatchSize = sweepBatchSize; }
+
     public int getBucketCapacity() { return bucketCapacity; }
     public void setBucketCapacity(int bucketCapacity) { this.bucketCapacity = bucketCapacity; }
 

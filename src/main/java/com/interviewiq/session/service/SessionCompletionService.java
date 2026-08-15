@@ -2,7 +2,14 @@ package com.interviewiq.session.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.interviewiq.auth.domain.User;
+import com.interviewiq.auth.infrastructure.UserRepository;
 import com.interviewiq.billing.service.WalletService;
+import com.interviewiq.candidate.domain.Candidate;
+import com.interviewiq.candidate.infrastructure.CandidateRepository;
+import com.interviewiq.email.service.EmailService;
+import com.interviewiq.job.domain.JobOpening;
+import com.interviewiq.job.infrastructure.JobOpeningRepository;
 import com.interviewiq.session.domain.EvaluationReport;
 import com.interviewiq.session.domain.InterviewSession;
 import com.interviewiq.session.domain.SessionStatus;
@@ -14,6 +21,7 @@ import com.interviewiq.shared.domain.PipelineStatus;
 import com.interviewiq.shared.exception.ResourceNotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -57,19 +65,34 @@ public class SessionCompletionService {
     private final WalletService walletService;
     private final BillingProperties billingProperties;
     private final ObjectMapper objectMapper;
+    private final JobOpeningRepository jobOpeningRepository;
+    private final CandidateRepository candidateRepository;
+    private final UserRepository userRepository;
+    private final EmailService emailService;
+
+    @Value("${app.frontend.base-url:https://app.interviewiq.in}")
+    private String frontendBaseUrl;
 
     public SessionCompletionService(InterviewSessionRepository sessionRepository,
                                     SessionAnswerRepository answerRepository,
                                     EvaluationReportRepository reportRepository,
                                     WalletService walletService,
                                     BillingProperties billingProperties,
-                                    ObjectMapper objectMapper) {
-        this.sessionRepository  = sessionRepository;
-        this.answerRepository   = answerRepository;
-        this.reportRepository   = reportRepository;
-        this.walletService      = walletService;
-        this.billingProperties  = billingProperties;
-        this.objectMapper       = objectMapper;
+                                    ObjectMapper objectMapper,
+                                    JobOpeningRepository jobOpeningRepository,
+                                    CandidateRepository candidateRepository,
+                                    UserRepository userRepository,
+                                    EmailService emailService) {
+        this.sessionRepository    = sessionRepository;
+        this.answerRepository     = answerRepository;
+        this.reportRepository     = reportRepository;
+        this.walletService        = walletService;
+        this.billingProperties    = billingProperties;
+        this.objectMapper         = objectMapper;
+        this.jobOpeningRepository = jobOpeningRepository;
+        this.candidateRepository  = candidateRepository;
+        this.userRepository       = userRepository;
+        this.emailService         = emailService;
     }
 
     /**
@@ -184,5 +207,53 @@ public class SessionCompletionService {
                 billingProperties.getSessionCostPaise());
 
         log.info("Report ready and session settled: sessionId={}", sessionId);
+
+        notifyReportReady(session);
+    }
+
+    /**
+     * Emails the recruiter that a report is ready to read (§7.6, INTIQ-71).
+     *
+     * <p>This is the notification the product is actually about. Everything up
+     * to here is machinery; a recruiter running a hiring drive wants to know the
+     * moment there is something to look at, and polling the sessions list is what
+     * they do instead when this email does not exist.
+     *
+     * <p>Sent after settlement and outside the guard above, so it fires exactly
+     * once per session — the {@code EVALUATING} check makes a second call return
+     * early before reaching this point.
+     *
+     * <p>Failures are absorbed. The report exists and the money is settled; an
+     * unsent email is a missed convenience, not a reason to unwind either.
+     */
+    private void notifyReportReady(InterviewSession session) {
+        try {
+            JobOpening job = jobOpeningRepository.findById(session.getJobOpeningId()).orElse(null);
+            if (job == null || job.getCreatedBy() == null) {
+                return;
+            }
+            String recruiterEmail = userRepository.findById(job.getCreatedBy())
+                    .map(User::getEmail)
+                    .orElse(null);
+            if (recruiterEmail == null) {
+                return;
+            }
+
+            String candidateName = candidateRepository.findById(session.getCandidateId())
+                    .map(Candidate::getFullName)
+                    .orElse("A candidate");
+
+            int score = reportRepository.findBySessionId(session.getId())
+                    .map(r -> r.getOverallScore() == null ? 0 : r.getOverallScore().intValue())
+                    .orElse(0);
+
+            emailService.sendReportReadyEmail(
+                    recruiterEmail, candidateName, job.getTitle(), score,
+                    frontendBaseUrl + "/sessions/" + session.getId(),
+                    session.getCompanyId());
+
+        } catch (RuntimeException e) {
+            log.warn("Report-ready email failed: sessionId={}", session.getId(), e);
+        }
     }
 }

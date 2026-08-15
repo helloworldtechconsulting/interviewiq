@@ -7,17 +7,18 @@ import java.util.Set;
  *
  * <p>DB CHECK values: {@code 'INVITED'}, {@code 'SCHEDULED'}, {@code 'IN_PROGRESS'},
  * {@code 'EVALUATING'}, {@code 'COMPLETED'}, {@code 'EXPIRED'}, {@code 'ERROR'},
- * {@code 'CANCELLED'} (see V042).
+ * {@code 'CANCELLED'}, {@code 'NO_SHOW'} (see V042, V054).
  *
  * <pre>
  *   INVITED     → SCHEDULED, IN_PROGRESS, EXPIRED, CANCELLED
- *   SCHEDULED   → IN_PROGRESS, EXPIRED, CANCELLED
+ *   SCHEDULED   → IN_PROGRESS, EXPIRED, CANCELLED, NO_SHOW
  *   IN_PROGRESS → EVALUATING, ERROR
  *   EVALUATING  → COMPLETED, ERROR
  *   COMPLETED   → (terminal)
  *   EXPIRED     → (terminal)
  *   ERROR       → (terminal — requires manual intervention)
  *   CANCELLED   → (terminal)
+ *   NO_SHOW     → (terminal)
  * </pre>
  *
  * <p>{@code INVITED → IN_PROGRESS} skips {@code SCHEDULED} entirely, which is the
@@ -65,11 +66,25 @@ public enum SessionStatus {
     /** Employer cancelled before start. Reservation released, buckets freed, link invalidated. */
     CANCELLED,
 
+    /**
+     * The candidate booked a slot and did not arrive within the grace window.
+     *
+     * <p>Distinct from {@link #EXPIRED}, which means an invite was never taken
+     * up at all. The distinction is not cosmetic: a no-show is a candidate who
+     * made a commitment and broke it, which a recruiter wants to see, and it
+     * happens on the <em>scheduled start</em> clock rather than the invite-expiry
+     * clock. Collapsing the two would leave a candidate who no-shows on Monday
+     * holding their reservation until their invite expires on Friday.
+     *
+     * <p>Not charged (§7.4.5). The reservation is released and the buckets freed.
+     */
+    NO_SHOW,
+
     /** System fault — evaluation failed after retries, or an unrecoverable room fault. */
     ERROR;
 
     private static final Set<SessionStatus> TERMINAL =
-            Set.of(COMPLETED, EXPIRED, CANCELLED, ERROR);
+            Set.of(COMPLETED, EXPIRED, CANCELLED, NO_SHOW, ERROR);
 
     /** States from which no further transition is valid. */
     public boolean isTerminal() {
@@ -97,10 +112,13 @@ public enum SessionStatus {
     public Set<SessionStatus> allowedTransitions() {
         return switch (this) {
             case INVITED     -> Set.of(SCHEDULED, IN_PROGRESS, EXPIRED, CANCELLED);
-            case SCHEDULED   -> Set.of(IN_PROGRESS, EXPIRED, CANCELLED);
+            // NO_SHOW is reachable only from SCHEDULED: it means "had a slot,
+            // did not arrive", which an INVITED session cannot be — it never
+            // booked one, so its failure mode is EXPIRED.
+            case SCHEDULED   -> Set.of(IN_PROGRESS, EXPIRED, CANCELLED, NO_SHOW);
             case IN_PROGRESS -> Set.of(EVALUATING, ERROR);
             case EVALUATING  -> Set.of(COMPLETED, ERROR);
-            case COMPLETED, EXPIRED, CANCELLED, ERROR -> Set.of();
+            case COMPLETED, EXPIRED, CANCELLED, NO_SHOW, ERROR -> Set.of();
         };
     }
 

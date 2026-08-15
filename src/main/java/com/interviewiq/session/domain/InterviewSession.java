@@ -106,6 +106,22 @@ public class InterviewSession {
 
     private OffsetDateTime endedAt;
 
+    /**
+     * When the T-24h reminder was sent. Null means unsent.
+     *
+     * <p>This is the idempotency key for the reminder sweep, not a log field.
+     * The sweep selects on {@code IS NULL} and stamps in the same transaction as
+     * the claim, which is what makes a duplicate send unreachable rather than
+     * merely unlikely — {@code SKIP LOCKED} alone would still allow a resend
+     * after a pod died between sending and committing.
+     */
+    @Column(name = "reminder_24h_sent_at")
+    private OffsetDateTime reminder24hSentAt;
+
+    /** When the T-1h reminder was sent. Same contract as {@link #reminder24hSentAt}. */
+    @Column(name = "reminder_1h_sent_at")
+    private OffsetDateTime reminder1hSentAt;
+
     @Column(unique = true, length = 255)
     private String roomTokenHash;
 
@@ -187,6 +203,12 @@ public class InterviewSession {
 
     public OffsetDateTime getEndedAt() { return endedAt; }
     public void setEndedAt(OffsetDateTime endedAt) { this.endedAt = endedAt; }
+
+    public OffsetDateTime getReminder24hSentAt() { return reminder24hSentAt; }
+    public void setReminder24hSentAt(OffsetDateTime v) { this.reminder24hSentAt = v; }
+
+    public OffsetDateTime getReminder1hSentAt() { return reminder1hSentAt; }
+    public void setReminder1hSentAt(OffsetDateTime v) { this.reminder1hSentAt = v; }
 
     public String getRoomTokenHash() { return roomTokenHash; }
     public void setRoomTokenHash(String roomTokenHash) { this.roomTokenHash = roomTokenHash; }

@@ -1,6 +1,7 @@
 package com.interviewiq.auth.infrastructure;
 
 import com.interviewiq.auth.domain.User;
+import com.interviewiq.auth.domain.UserRole;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
@@ -36,4 +37,14 @@ public interface UserRepository extends JpaRepository<User, UUID> {
      * this does NOT filter on {@code emailVerified}.
      */
     Optional<User> findByCompanyIdAndEmail(UUID companyId, String email);
+
+    /**
+     * The company's founding admin — earliest-created user with the ADMIN role.
+     *
+     * <p>Used as the recipient for account-level notices like the low-balance
+     * warning. Deliberately the <em>first</em> admin rather than an arbitrary
+     * one: on a self-serve signup that is the person who created the account and
+     * holds the payment method, so they are the one who can act on it.
+     */
+    Optional<User> findFirstByCompanyIdAndRoleOrderByCreatedAtAsc(UUID companyId, UserRole role);
 }

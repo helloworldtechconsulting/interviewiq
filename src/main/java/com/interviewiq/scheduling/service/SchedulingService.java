@@ -1,6 +1,13 @@
 package com.interviewiq.scheduling.service;
 
+import com.interviewiq.candidate.domain.Candidate;
+import com.interviewiq.candidate.infrastructure.CandidateRepository;
+import com.interviewiq.company.domain.Company;
+import com.interviewiq.company.infrastructure.CompanyRepository;
+import com.interviewiq.email.service.EmailService;
 import com.interviewiq.job.domain.DurationTier;
+import com.interviewiq.job.domain.JobOpening;
+import com.interviewiq.job.infrastructure.JobOpeningRepository;
 import com.interviewiq.scheduling.domain.CapacityBucket;
 import com.interviewiq.scheduling.dto.SchedulingDtos.AvailableTimesResponse;
 import com.interviewiq.scheduling.dto.SchedulingDtos.BookingResponse;
@@ -14,9 +21,11 @@ import com.interviewiq.shared.exception.SessionStateException;
 import com.interviewiq.shared.exception.ValidationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -66,13 +75,31 @@ public class SchedulingService {
     private final InterviewSessionRepository sessionRepository;
     private final CapacityService capacityService;
     private final SchedulingProperties schedulingProperties;
+    private final CandidateRepository candidateRepository;
+    private final CompanyRepository companyRepository;
+    private final JobOpeningRepository jobOpeningRepository;
+    private final EmailService emailService;
+    private final IcsCalendarWriter icsCalendarWriter;
+
+    @Value("${app.frontend.base-url:https://app.interviewiq.in}")
+    private String frontendBaseUrl;
 
     public SchedulingService(InterviewSessionRepository sessionRepository,
                              CapacityService capacityService,
-                             SchedulingProperties schedulingProperties) {
+                             SchedulingProperties schedulingProperties,
+                             CandidateRepository candidateRepository,
+                             CompanyRepository companyRepository,
+                             JobOpeningRepository jobOpeningRepository,
+                             EmailService emailService,
+                             IcsCalendarWriter icsCalendarWriter) {
         this.sessionRepository    = sessionRepository;
         this.capacityService      = capacityService;
         this.schedulingProperties = schedulingProperties;
+        this.candidateRepository  = candidateRepository;
+        this.companyRepository    = companyRepository;
+        this.jobOpeningRepository = jobOpeningRepository;
+        this.emailService         = emailService;
+        this.icsCalendarWriter    = icsCalendarWriter;
     }
 
     // =========================================================================
@@ -174,13 +201,72 @@ public class SchedulingService {
 
         session.setScheduledStartAt(aligned);
         session.setStatus(SessionStatus.SCHEDULED);
+
+        // A reschedule moves the interview, so the reminders that were already
+        // sent for the old time are no longer true. Clearing the stamps re-arms
+        // the sweep against the new start — without this, a candidate who moves
+        // from Friday to Monday gets no reminders at all, having already been
+        // reminded about a slot that no longer exists.
+        if (isReschedule) {
+            session.setReminder24hSentAt(null);
+            session.setReminder1hSentAt(null);
+        }
         sessionRepository.save(session);
 
         log.info("Interview {}: sessionId={} startAt={} tier={}",
                 isReschedule ? "rescheduled" : "booked", sessionId, aligned, tier);
 
+        sendConfirmation(session, tier, aligned, isReschedule);
+
         return new BookingResponse(aligned, tier.getMinutes(), session.getStatus().name(),
                 "/api/v1/candidate/scheduling/" + sessionId + "/calendar.ics");
+    }
+
+    /**
+     * Emails the booking or reschedule confirmation with the {@code .ics}
+     * attached.
+     *
+     * <p>Failures are absorbed. The slot is booked and the capacity is taken by
+     * the time this runs; throwing here would roll back a successful booking
+     * because an SMTP server was briefly unreachable, and the candidate can still
+     * download the same {@code .ics} from the page they just booked on.
+     */
+    private void sendConfirmation(InterviewSession session, DurationTier tier,
+                                  OffsetDateTime startAt, boolean isReschedule) {
+        try {
+            Candidate candidate = candidateRepository.findById(session.getCandidateId()).orElse(null);
+            if (candidate == null) {
+                return;
+            }
+            String companyName = companyRepository.findById(session.getCompanyId())
+                    .map(Company::getName)
+                    .orElse("InterviewIQ");
+            String jobTitle = jobOpeningRepository.findById(session.getJobOpeningId())
+                    .map(JobOpening::getTitle)
+                    .orElse("Interview");
+            String joinUrl = frontendBaseUrl + "/interview/room/" + session.getId();
+
+            // SEQUENCE 0 for a first booking, 1 for a reschedule. Calendar clients
+            // ignore an update whose SEQUENCE has not advanced, so a reschedule
+            // that reused 0 would silently leave the old time in the candidate's
+            // calendar — the exact failure the stable UID exists to avoid.
+            byte[] ics = icsCalendarWriter.write(
+                    session.getId(), isReschedule ? 1 : 0, startAt, tier.getMinutes(),
+                    jobTitle, companyName, joinUrl).getBytes(StandardCharsets.UTF_8);
+
+            if (isReschedule) {
+                emailService.sendRescheduleConfirmationEmail(
+                        candidate.getEmail(), candidate.getFullName(), companyName,
+                        startAt, ZoneOffset.UTC, joinUrl, ics, session.getCompanyId());
+            } else {
+                emailService.sendBookingConfirmationEmail(
+                        candidate.getEmail(), candidate.getFullName(), companyName,
+                        startAt, ZoneOffset.UTC, joinUrl, ics, session.getCompanyId());
+            }
+
+        } catch (RuntimeException e) {
+            log.error("Booking confirmation email failed: sessionId={}", session.getId(), e);
+        }
     }
 
     /**

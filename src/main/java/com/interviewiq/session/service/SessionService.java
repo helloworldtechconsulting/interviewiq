@@ -256,7 +256,12 @@ public class SessionService {
 
         return switch (session.getStatus()) {
             case INVITED, SCHEDULED -> resendInvite(session);
-            case EXPIRED, CANCELLED, ERROR -> createReplacementSession(session);
+            // NO_SHOW belongs with the other unused endings: the reservation was
+            // already released when the sweep marked it, so a re-invite has to
+            // take a fresh one. It is also the most likely reinvite of all —
+            // "they missed it, send it again" is the request this endpoint will
+            // mostly serve.
+            case EXPIRED, CANCELLED, NO_SHOW, ERROR -> createReplacementSession(session);
             case IN_PROGRESS, EVALUATING -> throw new SessionStateException(
                     "This interview is already under way, so a new invite cannot be sent.");
             case COMPLETED -> throw new SessionStateException(
@@ -329,12 +334,25 @@ public class SessionService {
         return SessionResponse.from(session);
     }
 
-    @Transactional(readOnly = true)
+    // Not read-only: the first view is stamped here, which is a write.
+    @Transactional
     public EvaluationReportResponse getEvaluation(UUID sessionId) {
         UUID companyId = SecurityContext.requireCompanyId();
         EvaluationReport report = evaluationReportRepository
                 .findByCompanyIdAndSessionId(companyId, sessionId)
                 .orElseThrow(() -> new ResourceNotFoundException("EvaluationReport for session", sessionId));
+
+        // Stamp the first employer view, which is what the dashboard's
+        // "awaiting review" counter measures (§7.7, V055). Written once and
+        // never refreshed: re-reading a report already acted on should not make
+        // it look unread, and this is a backlog counter rather than an activity
+        // log. Only a finished report counts — opening one still generating is
+        // not the recruiter reading anything.
+        if (report.getViewedAt() == null && report.getGenerationStatus() == PipelineStatus.DONE) {
+            report.setViewedAt(OffsetDateTime.now(ZoneOffset.UTC));
+            evaluationReportRepository.save(report);
+        }
+
         return EvaluationReportResponse.from(report);
     }
 
