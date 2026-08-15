@@ -72,6 +72,11 @@ const SettingsPage = lazy(() =>
     default: m.SettingsPage,
   })),
 );
+const AdminPanelPage = lazy(() =>
+  import("@/pages/employer/admin/AdminPanelPage").then((m) => ({
+    default: m.AdminPanelPage,
+  })),
+);
 
 // ── Candidate interview room (lazily loaded) ──────────────────────────────────
 const CandidateRoomPage = lazy(() =>
@@ -164,6 +169,13 @@ export const router = createBrowserRouter([
           {
             path: "/app/settings",
             element: <Lazy><SettingsPage /></Lazy>,
+          },
+          {
+            // Platform staff only. The route existing is not the control — the
+            // endpoints behind it are PLATFORM_STAFF-gated server-side, so a
+            // customer who guesses the URL sees an empty console and 403s.
+            path: "/app/admin",
+            element: <Lazy><AdminPanelPage /></Lazy>,
           },
         ],
       },

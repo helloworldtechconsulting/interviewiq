@@ -25,7 +25,12 @@ export interface ApiError {
 
 // ── Enums ─────────────────────────────────────────────────────────────────────
 
-export type UserRole = "ADMIN" | "RECRUITER" | "VIEWER";
+/**
+ * PLATFORM_STAFF is InterviewIQ's own staff, not a customer role (V053). It is
+ * the only value that unlocks the platform console, and no customer-facing
+ * screen should ever offer it as a choice.
+ */
+export type UserRole = "ADMIN" | "RECRUITER" | "VIEWER" | "PLATFORM_STAFF";
 
 export type CompanyStatus = "ACTIVE" | "INACTIVE" | "SUSPENDED";
 

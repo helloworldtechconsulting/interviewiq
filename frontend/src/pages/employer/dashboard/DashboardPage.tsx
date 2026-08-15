@@ -14,10 +14,8 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { jobsApi } from "@/api/modules/jobs";
-import { candidatesApi } from "@/api/modules/candidates";
-import { sessionsApi } from "@/api/modules/sessions";
 import { billingApi } from "@/api/modules/billing";
+import { dashboardApi } from "@/api/modules/dashboard";
 import { queryKeys } from "@/lib/queryKeys";
 import { PageHeader } from "@/components/common/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -58,6 +56,15 @@ function StatCard({ title, value, sub, icon, loading }: StatCardProps) {
   );
 }
 
+/**
+ * Mirrors `app.billing.low-balance-threshold-paise` (Rs.300).
+ *
+ * Duplicated rather than fetched: the wallet endpoint does not return the
+ * threshold, and one extra round trip to learn a constant that changes roughly
+ * never is worse than a comment saying where the other copy lives.
+ */
+const LOW_BALANCE_THRESHOLD_PAISE = 30_000;
+
 function getGreeting() {
   const h = new Date().getHours();
   if (h < 12) return "morning";
@@ -71,19 +78,17 @@ export function DashboardPage() {
   const navigate = useNavigate();
   const user = useAuthUser();
 
-  const { data: jobs, isLoading: jobsLoading } = useQuery({
-    queryKey: queryKeys.jobs.list({ status: "OPEN" }),
-    queryFn: () => jobsApi.list({ status: "OPEN", size: 1 }),
+  // Real counters, not totalElements read off four list envelopes. The old
+  // approach answered "how many rows match this query" while the labels said
+  // "pending interviews", so cancelled and expired sessions were counted too.
+  const { data: stats, isLoading: statsLoading } = useQuery({
+    queryKey: ["dashboard", "stats"],
+    queryFn: dashboardApi.stats,
   });
 
-  const { data: candidates, isLoading: candidatesLoading } = useQuery({
-    queryKey: queryKeys.candidates.list(),
-    queryFn: () => candidatesApi.list({ size: 1 }),
-  });
-
-  const { data: sessions, isLoading: sessionsLoading } = useQuery({
-    queryKey: queryKeys.sessions.list({ page: 0 }),
-    queryFn: () => sessionsApi.list({ size: 5 }),
+  const { data: recent, isLoading: sessionsLoading } = useQuery({
+    queryKey: ["dashboard", "recent-sessions"],
+    queryFn: dashboardApi.recentSessions,
   });
 
   const { data: wallet, isLoading: walletLoading } = useQuery({
@@ -91,7 +96,12 @@ export function DashboardPage() {
     queryFn: billingApi.getWallet,
   });
 
-  const recentSessions = sessions?.content ?? [];
+  const recentSessions = recent ?? [];
+
+  // §7.8.2 — the banner stays up while the balance is low, rather than relying
+  // on the one email. Someone who missed the email still cannot miss this.
+  const lowBalance =
+    wallet != null && wallet.totalBalancePaise <= LOW_BALANCE_THRESHOLD_PAISE;
 
   return (
     <div className="space-y-6">
@@ -104,24 +114,28 @@ export function DashboardPage() {
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           title="Open Jobs"
-          value={jobs?.totalElements ?? 0}
+          value={stats?.activeJobs ?? 0}
           sub="Active job postings"
           icon={<Briefcase className="h-4 w-4" />}
-          loading={jobsLoading}
+          loading={statsLoading}
         />
         <StatCard
           title="Total Candidates"
-          value={candidates?.totalElements ?? 0}
+          value={stats?.totalCandidates ?? 0}
           sub="Across all jobs"
           icon={<Users className="h-4 w-4" />}
-          loading={candidatesLoading}
+          loading={statsLoading}
         />
         <StatCard
-          title="Sessions Total"
-          value={sessions?.totalElements ?? 0}
-          sub="AI interview sessions"
+          title="Interviews in Flight"
+          value={stats?.pendingInterviews ?? 0}
+          sub={
+            stats && stats.reportsAwaitingReview > 0
+              ? `${stats.reportsAwaitingReview} report${stats.reportsAwaitingReview === 1 ? "" : "s"} to read`
+              : "Invited, scheduled or scoring"
+          }
           icon={<Video className="h-4 w-4" />}
-          loading={sessionsLoading}
+          loading={statsLoading}
         />
         <StatCard
           title="Wallet Balance"
@@ -141,6 +155,29 @@ export function DashboardPage() {
           loading={walletLoading}
         />
       </div>
+
+      {/* ── Low-balance banner (§7.8.2) ─────────────────────────────────────── */}
+      {lowBalance && (
+        <Card className="border-amber-200 bg-amber-50">
+          <CardContent className="flex flex-wrap items-center justify-between gap-3 pt-4">
+            <div className="flex gap-3">
+              <TrendingUp className="h-5 w-5 shrink-0 text-amber-700" />
+              <div className="text-sm text-amber-900">
+                <p className="font-medium">Your balance is running low</p>
+                <p className="mt-0.5">
+                  {formatRupees(wallet!.availablePaise)} available — enough for about{" "}
+                  {Math.floor(wallet!.availablePaise / 10_000)} more interview
+                  {Math.floor(wallet!.availablePaise / 10_000) === 1 ? "" : "s"}. Interviews
+                  cannot be sent once the balance will not cover them.
+                </p>
+              </div>
+            </div>
+            <Button size="sm" onClick={() => navigate("/app/billing")}>
+              Top up
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {/* ── Recent sessions ─────────────────────────────────────────────────── */}
       <Card>
