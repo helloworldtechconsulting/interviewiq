@@ -31,6 +31,53 @@ public interface JobOpeningRepository extends JpaRepository<JobOpening, UUID> {
     long countByCompanyIdAndStatus(UUID companyId, JobStatus status);
 
     /**
+     * Claims openings whose JD is extracted but whose question bank is not yet
+     * generated (INTIQ-17, V056).
+     *
+     * <p>Claimed with {@code FOR UPDATE SKIP LOCKED} like every other worker
+     * (§7.9), and the reason is sharper here than for most. Duplicate evaluation
+     * wastes money and produces a non-deterministic score; duplicate <em>bank</em>
+     * generation silently changes which questions are core, so two candidates
+     * interviewed minutes apart would be scored against different fixed sets —
+     * defeating the one property the core exists to provide.
+     *
+     * <p>The staleness clause reclaims banks abandoned by a pod that died
+     * mid-generation, rather than leaving the opening permanently unable to
+     * invite anyone.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(value = """
+           UPDATE job_openings
+           SET question_bank_status   = 'IN_PROGRESS',
+               question_bank_attempts = question_bank_attempts + 1,
+               question_bank_claimed_at = now(),
+               updated_at             = now()
+           WHERE id IN (
+               SELECT id FROM job_openings
+               WHERE jd_extraction_status = 'DONE'
+                 AND status = 'ACTIVE'
+                 AND question_bank_attempts < :maxAttempts
+                 AND (question_bank_status = 'PENDING'
+                      OR (question_bank_status = 'IN_PROGRESS' AND question_bank_claimed_at < :staleBefore))
+               ORDER BY created_at ASC
+               LIMIT :batchSize
+               FOR UPDATE SKIP LOCKED
+           )
+           RETURNING *
+           """, nativeQuery = true)
+    List<JobOpening> claimForQuestionBank(@Param("batchSize") int batchSize,
+                                          @Param("staleBefore") OffsetDateTime staleBefore,
+                                          @Param("maxAttempts") int maxAttempts);
+
+    /** Pending bank generation, for the KEDA scaler and the readiness alarm. */
+    @Query(value = """
+           SELECT COUNT(*) FROM job_openings
+           WHERE jd_extraction_status = 'DONE'
+             AND question_bank_status IN ('PENDING', 'IN_PROGRESS')
+           """, nativeQuery = true)
+    long countPendingQuestionBanks();
+
+    /**
      * Company job listing with optional status and free-text filters, applied in
      * the database rather than in the browser.
      *
