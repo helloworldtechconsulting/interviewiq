@@ -12,10 +12,12 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -92,9 +94,33 @@ public class QuestionAssemblyService {
                            List<String> resumeQuestions,
                            DurationTier tier,
                            UUID candidateId) {
+        return assemble(bankJson, employerQuestions, resumeQuestions, tier, candidateId, List.of());
+    }
+
+    /**
+     * Assembly that also honours auto-retirement (INTIQ-93).
+     *
+     * <p>Retired questions are dropped from the rotating pool but <strong>not</strong>
+     * from the core. A retired core question is a real problem — it means the
+     * comparability set contains something that does not discriminate — but
+     * silently dropping it mid-opening is worse, because candidates interviewed
+     * before and after the retirement would then have different cores and their
+     * scores would stop being comparable without anything saying so. The core is
+     * fixed for the life of the opening by design; fixing a bad core question is
+     * a regenerate-the-bank operation, not a quiet omission.
+     *
+     * @param retiredQuestionIds bank ids the retirement sweep has taken out
+     */
+    public String assemble(String bankJson,
+                           List<String> employerQuestions,
+                           List<String> resumeQuestions,
+                           DurationTier tier,
+                           UUID candidateId,
+                           List<String> retiredQuestionIds) {
 
         List<ObjectNode> bank = readBank(bankJson);
         List<String> coreIds = readCoreIds(bankJson);
+        Set<String> retired = new HashSet<>(retiredQuestionIds);
 
         int target = tier.getQuestionCount();
         int resumeSlots = Math.min(resumeQuestions.size(), Math.max(1, target / RESUME_SHARE_DIVISOR));
@@ -124,7 +150,11 @@ public class QuestionAssemblyService {
         }
 
         // ── 3. Rotating tail, seeded on the candidate ────────────────────────
-        List<ObjectNode> remaining = new ArrayList<>(byId.values());
+        // Retired questions leave the rotating pool here. The core above is
+        // deliberately untouched — see the method comment.
+        List<ObjectNode> remaining = new ArrayList<>(byId.values().stream()
+                .filter(q -> !retired.contains(q.get("id").asText()))
+                .toList());
         Collections.shuffle(remaining, new Random(candidateId.hashCode()));
 
         for (ObjectNode q : remaining) {

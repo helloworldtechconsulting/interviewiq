@@ -67,6 +67,7 @@ public class EvaluationService {
     private final CandidateRepository candidateRepository;
     private final JobOpeningRepository jobRepository;
     private final AiWorkflowProperties aiProperties;
+    private final QuestionRetirementService retirementService;
     private final ObjectMapper objectMapper;
 
     public EvaluationService(
@@ -79,6 +80,7 @@ public class EvaluationService {
             CandidateRepository candidateRepository,
             JobOpeningRepository jobRepository,
             AiWorkflowProperties aiProperties,
+            QuestionRetirementService retirementService,
             ObjectMapper objectMapper) {
         this.evaluationClient  = evaluationClient;
         this.shadowClient      = shadowClient;
@@ -89,6 +91,7 @@ public class EvaluationService {
         this.candidateRepository = candidateRepository;
         this.jobRepository     = jobRepository;
         this.aiProperties      = aiProperties;
+        this.retirementService = retirementService;
         this.objectMapper      = objectMapper;
     }
 
@@ -277,6 +280,41 @@ public class EvaluationService {
             }
         }
         answerRepository.saveAll(answers);
+
+        foldScoresIntoTelemetry(answers);
+    }
+
+    /**
+     * Folds the newly written scores into each question's running variance
+     * (INTIQ-93 item 4).
+     *
+     * <p>This is the second half of a two-part record. The interview room counts
+     * the ask and the skip as they happen; the score does not exist until here,
+     * minutes later. Without this call the variance would stay at zero for every
+     * question — which the retirement rules would read as "discriminates
+     * nothing" and act on, retiring the entire bank.
+     *
+     * <p>Only scored, non-skipped, bank-sourced answers contribute. A skipped
+     * question was already counted when it was skipped, and counting it again
+     * here would double its weight in the ask total.
+     *
+     * <p>Failures are absorbed: the evaluation is written and the candidate has
+     * their report, and a lost telemetry point is a gap in a statistic rather
+     * than a defect in the product.
+     */
+    private void foldScoresIntoTelemetry(List<SessionAnswer> answers) {
+        for (SessionAnswer answer : answers) {
+            if (answer.getBankQuestionId() == null || answer.getScore() == null || answer.isSkipped()) {
+                continue;
+            }
+            try {
+                retirementService.recordScore(
+                        answer.getSessionId(), answer.getBankQuestionId(), answer.getScore());
+            } catch (RuntimeException e) {
+                log.warn("Question telemetry score not recorded: sessionId={} questionId={}",
+                        answer.getSessionId(), answer.getBankQuestionId(), e);
+            }
+        }
     }
 
     // =========================================================================

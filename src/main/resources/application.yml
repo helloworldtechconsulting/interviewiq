@@ -215,6 +215,21 @@ app:
     booking-horizon: P30D
     minimum-notice: PT5M
     question-generation-sla: PT30M   # alarmed if breached; typical is ~20 seconds
+    no-show-grace: PT15M             # generous on purpose — a missed slot costs a real applicant
+    first-reminder-lead: PT24H
+    second-reminder-lead: PT1H
+    sweep-batch-size: 100
+
+  # Auto-retirement thresholds (§7.5, INTIQ-93). Every number here is a starting
+  # guess — the right values are empirical, which is why they are configuration
+  # and why the console has a threshold preview.
+  question-quality:
+    minimum-sample: 10          # no rule applies below this; a distribution of three is not one
+    max-skip-rate: 0.4          # skipped this often → confusing, or unanswerable aloud
+    max-short-answer-rate: 0.5  # sub-5-word answers this often → closed, or too vague
+    min-score-variance: 0.5     # on a 0-10 scale this is ~0.7 SD: everyone lands within a point
+    candidate-flag-threshold: 3
+    sweep-cron: "0 0 3 * * *"   # daily; the distribution does not change between interviews
 
   billing:
     session-cost-paise: 10000  # ₹100 per completed interview, flat across all duration tiers (PRD v2.1 §7.8.1)

@@ -7,6 +7,7 @@ import com.interviewiq.candidate.infrastructure.CandidateRepository;
 import com.interviewiq.job.domain.EmployerQuestion;
 import com.interviewiq.job.domain.JobOpening;
 import com.interviewiq.job.infrastructure.EmployerQuestionRepository;
+import com.interviewiq.ai.infrastructure.QuestionTelemetryRepository;
 import com.interviewiq.job.infrastructure.JobOpeningRepository;
 import com.interviewiq.session.domain.InterviewSession;
 import com.interviewiq.session.infrastructure.InterviewSessionRepository;
@@ -84,6 +85,7 @@ public class QuestionGenerationWorker {
     private final PromptTemplateService      prompts;
     private final PiiRedactionService        piiRedaction;
     private final ChatClient                 chatClient;
+    private final QuestionTelemetryRepository telemetryRepository;
     private final ObjectMapper               objectMapper;
 
     /** Self-reference so the transactional boundaries below actually apply. */
@@ -101,6 +103,7 @@ public class QuestionGenerationWorker {
                                     PromptTemplateService prompts,
                                     PiiRedactionService piiRedaction,
                                     @Qualifier("questionChatClient") ChatClient chatClient,
+                                    QuestionTelemetryRepository telemetryRepository,
                                     ObjectMapper objectMapper) {
         this.sessionRepository          = sessionRepository;
         this.jobOpeningRepository       = jobOpeningRepository;
@@ -112,6 +115,7 @@ public class QuestionGenerationWorker {
         this.prompts                    = prompts;
         this.piiRedaction               = piiRedaction;
         this.chatClient                 = chatClient;
+        this.telemetryRepository        = telemetryRepository;
         this.objectMapper               = objectMapper;
     }
 
@@ -174,12 +178,18 @@ public class QuestionGenerationWorker {
 
             List<String> resumeQuestions = generateResumeQuestions(job, candidate, session);
 
+            // Retired questions leave the rotating pool. Fetched per session
+            // rather than cached, because the sweep runs between invites and a
+            // stale list would keep asking a question already judged useless.
+            List<String> retired = telemetryRepository.findRetiredQuestionIds(job.getId());
+
             String questionsJson = assemblyService.assemble(
                     job.getQuestionBankJsonb(),
                     employerQuestions,
                     resumeQuestions,
                     session.getDurationTier(),
-                    candidate.getId());
+                    candidate.getId(),
+                    retired);
 
             self.recordSuccess(session.getId(), questionsJson, resumeQuestions.isEmpty());
             log.info("QuestionGenerationWorker: assembled questions for sessionId={} resumeQuestions={}",
