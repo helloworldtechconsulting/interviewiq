@@ -154,11 +154,29 @@ app:
       capacity: 3           # max burst for POST /api/v1/companies/register per IP
       refill-tokens: 3      # tokens added per refill window
       refill-duration: PT30M # 30-minute refill — 3 new companies per 30 min max
-  aws:
-    region: ap-south-1
-    s3-bucket: ""
-    ses-from-address: noreply@interviewiq.ai
+  # ── Object storage — S3-compatible (PRD v2.1 §9.2, Arch v4.0 §3) ──────────
+  # One SDK plus an endpoint override runs on S3, GCS interop, Cloudflare R2,
+  # Spaces, MinIO or OCI. R2 charges zero egress, which is material because
+  # recording playback is the only meaningful egress this product generates.
+  storage:
+    endpoint: ""              # empty = real AWS S3; set for R2/GCS/Spaces/MinIO
+    region: ap-south-1        # R2 expects "auto"
+    bucket: ""
+    access-key: ""            # empty on AWS → default credential chain
+    secret-key: ""
+    path-style-access: true
     use-local-stub: false
+    recording-retention-days: 7   # stated in the candidate consent notice (§7.5.3)
+
+  # ── Email — SMTP via JavaMailSender (§13.3) ───────────────────────────────
+  # Provider is a config change: Resend, Brevo, Postmark or SES-over-SMTP.
+  # Host and credentials live under spring.mail.*; domain verification with
+  # DKIM, SPF and DMARC is launch-blocking whichever provider is chosen.
+  mail:
+    from-address: noreply@interviewiq.in
+    from-name: InterviewIQ
+    use-local-stub: false
+
   # ── Worker tuning (PRD v2.1 §7.9) ─────────────────────────────────────────
   # Every polling worker claims with FOR UPDATE SKIP LOCKED and an explicit
   # batch limit, so each pod takes a distinct set of rows.

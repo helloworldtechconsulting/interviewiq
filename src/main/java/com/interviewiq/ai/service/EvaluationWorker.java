@@ -16,6 +16,7 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -60,6 +61,7 @@ import java.util.List;
  * permanently marked {@code FAILED} to prevent infinite retry loops.
  */
 @Component
+@ConditionalOnProperty(name = "app.schedulers.enabled", havingValue = "true", matchIfMissing = true)
 public class EvaluationWorker {
 
     private static final Logger log = LoggerFactory.getLogger(EvaluationWorker.class);

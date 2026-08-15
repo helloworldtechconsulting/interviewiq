@@ -19,6 +19,23 @@
 
 spring:
 
+  # ── SMTP transport (Resend / Brevo / Postmark / SES-over-SMTP) ─────────────
+  mail:
+    host:     ${SMTP_HOST}
+    port:     ${SMTP_PORT:587}
+    username: ${SMTP_USERNAME}
+    password: ${SMTP_PASSWORD}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            required: true
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
+
   # ── Database ───────────────────────────────────────────────────────────────
   datasource:
     url:      jdbc:postgresql://${DB_HOST}:${DB_PORT:5432}/${DB_NAME}
@@ -110,7 +127,19 @@ app:
     key-id:     ${RAZORPAY_KEY_ID}
     key-secret: ${RAZORPAY_KEY_SECRET}
 
-  aws:
-    region:     ${AWS_REGION:ap-south-1}
-    s3-bucket:  ${AWS_S3_BUCKET}
+  storage:
+    # Endpoint override selects the provider. Empty = AWS S3; set to the R2 /
+    # GCS-interop / Spaces / MinIO endpoint to run anywhere else. Injected by the
+    # workload Terraform module from the platform module's output contract.
+    endpoint:    ${OBJECT_STORAGE_ENDPOINT:}
+    region:      ${OBJECT_STORAGE_REGION:ap-south-1}
+    bucket:      ${OBJECT_STORAGE_BUCKET}
+    access-key:  ${OBJECT_STORAGE_ACCESS_KEY:}
+    secret-key:  ${OBJECT_STORAGE_SECRET_KEY:}
+    path-style-access: true
+    use-local-stub: false
+
+  mail:
+    from-address: ${MAIL_FROM_ADDRESS}
+    from-name:    ${MAIL_FROM_NAME:InterviewIQ}
     use-local-stub: false

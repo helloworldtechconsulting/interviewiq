@@ -1,6 +1,6 @@
 package com.interviewiq.storage.service;
 
-import com.interviewiq.shared.config.AwsProperties;
+import com.interviewiq.shared.config.ObjectStorageProperties;
 import com.interviewiq.shared.exception.ValidationException;
 import com.interviewiq.storage.domain.UploadKind;
 import org.slf4j.Logger;
@@ -22,13 +22,18 @@ import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignReques
 import java.time.Duration;
 
 /**
- * Wrapper around AWS S3 for presigned URL generation and object lifecycle management.
+ * Wrapper around S3-compatible object storage for pre-signed URL generation and
+ * object lifecycle management.
+ *
+ * <p>Works against S3, GCS interop, Cloudflare R2, DigitalOcean Spaces, MinIO or
+ * OCI — the difference is an endpoint override and path-style addressing, both
+ * configured in {@link com.interviewiq.shared.config.ObjectStorageConfig}.
  *
  * <p>All operations short-circuit to stub responses when
- * {@link AwsProperties#isUseLocalStub()} is {@code true}. Stub URLs are recognisable
+ * {@link ObjectStorageProperties#isUseLocalStub()} is {@code true}. Stub URLs are recognisable
  * by the {@code ?stub=} query parameter and are not valid for real S3 requests.
  *
- * <p>Objects are always stored in the bucket configured via {@code app.aws.s3-bucket}.
+ * <p>Objects are always stored in the bucket configured via {@code app.storage.bucket}.
  * Callers supply only the <em>object key</em> (the path within the bucket).
  */
 @Service
@@ -38,9 +43,9 @@ public class StorageService {
 
     private final S3Client    s3Client;
     private final S3Presigner s3Presigner;
-    private final AwsProperties props;
+    private final ObjectStorageProperties props;
 
-    public StorageService(S3Client s3Client, S3Presigner s3Presigner, AwsProperties props) {
+    public StorageService(S3Client s3Client, S3Presigner s3Presigner, ObjectStorageProperties props) {
         this.s3Client    = s3Client;
         this.s3Presigner = s3Presigner;
         this.props       = props;
@@ -57,14 +62,14 @@ public class StorageService {
      */
     public String generatePresignedUploadUrl(String objectKey, String contentType, Duration expiry) {
         if (props.isUseLocalStub()) {
-            log.info("[S3 STUB] presignedUpload bucket={} key={} contentType={}", props.getS3Bucket(), objectKey, contentType);
-            return "http://localhost:4566/" + props.getS3Bucket() + "/" + objectKey + "?stub=upload";
+            log.info("[STORAGE STUB] presignedUpload bucket={} key={} contentType={}", props.getBucket(), objectKey, contentType);
+            return "http://localhost:4566/" + props.getBucket() + "/" + objectKey + "?stub=upload";
         }
 
         PutObjectPresignRequest request = PutObjectPresignRequest.builder()
                 .signatureDuration(expiry)
                 .putObjectRequest(PutObjectRequest.builder()
-                        .bucket(props.getS3Bucket())
+                        .bucket(props.getBucket())
                         .key(objectKey)
                         .contentType(contentType)
                         .build())
@@ -83,14 +88,14 @@ public class StorageService {
      */
     public String generatePresignedDownloadUrl(String objectKey, Duration expiry) {
         if (props.isUseLocalStub()) {
-            log.info("[S3 STUB] presignedDownload bucket={} key={}", props.getS3Bucket(), objectKey);
-            return "http://localhost:4566/" + props.getS3Bucket() + "/" + objectKey + "?stub=download";
+            log.info("[STORAGE STUB] presignedDownload bucket={} key={}", props.getBucket(), objectKey);
+            return "http://localhost:4566/" + props.getBucket() + "/" + objectKey + "?stub=download";
         }
 
         GetObjectPresignRequest request = GetObjectPresignRequest.builder()
                 .signatureDuration(expiry)
                 .getObjectRequest(GetObjectRequest.builder()
-                        .bucket(props.getS3Bucket())
+                        .bucket(props.getBucket())
                         .key(objectKey)
                         .build())
                 .build();
@@ -110,13 +115,13 @@ public class StorageService {
      */
     public byte[] downloadObject(String objectKey) {
         if (props.isUseLocalStub()) {
-            log.info("[S3 STUB] downloadObject bucket={} key={}", props.getS3Bucket(), objectKey);
+            log.info("[STORAGE STUB] downloadObject bucket={} key={}", props.getBucket(), objectKey);
             return new byte[0];
         }
 
         ResponseBytes<GetObjectResponse> response = s3Client.getObjectAsBytes(
                 GetObjectRequest.builder()
-                        .bucket(props.getS3Bucket())
+                        .bucket(props.getBucket())
                         .key(objectKey)
                         .build());
         return response.asByteArray();
@@ -142,14 +147,14 @@ public class StorageService {
      */
     public void verifyUploadedObject(String objectKey, UploadKind kind) {
         if (props.isUseLocalStub()) {
-            log.info("[S3 STUB] verifyUploadedObject key={} kind={}", objectKey, kind);
+            log.info("[STORAGE STUB] verifyUploadedObject key={} kind={}", objectKey, kind);
             return;
         }
 
         HeadObjectResponse head;
         try {
             head = s3Client.headObject(HeadObjectRequest.builder()
-                    .bucket(props.getS3Bucket())
+                    .bucket(props.getBucket())
                     .key(objectKey)
                     .build());
         } catch (NoSuchKeyException e) {
@@ -185,12 +190,12 @@ public class StorageService {
      */
     public void deleteObject(String objectKey) {
         if (props.isUseLocalStub()) {
-            log.info("[S3 STUB] deleteObject bucket={} key={}", props.getS3Bucket(), objectKey);
+            log.info("[STORAGE STUB] deleteObject bucket={} key={}", props.getBucket(), objectKey);
             return;
         }
 
         s3Client.deleteObject(DeleteObjectRequest.builder()
-                .bucket(props.getS3Bucket())
+                .bucket(props.getBucket())
                 .key(objectKey)
                 .build());
     }
