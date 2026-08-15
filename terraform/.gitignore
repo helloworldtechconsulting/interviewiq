@@ -2,12 +2,20 @@
 .terraform/
 .terraform.lock.hcl
 *.tfstate
+*.tfstate*
 *.tfstate.backup
 *.tfplan
 tfplan
 plan_output.txt
 
-# Sensitive variable files — use CI/CD env vars instead
+# Sensitive variable files — use CI/CD env vars instead.
+#
+# Arch v4.0 §4 flags this specific gap: "Add .terraform/, *.tfstate*, *.tfvars
+# to .gitignore — currently missing." Only *.tfvars.local was ignored, so a
+# plain terraform.tfvars carrying a database password or an R2 secret key would
+# have been committed.
+*.tfvars
+*.tfvars.json
 *.tfvars.local
 override.tf
 override.tf.json
