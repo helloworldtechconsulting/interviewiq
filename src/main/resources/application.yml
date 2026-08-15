@@ -88,6 +88,20 @@ management:
   endpoint:
     health:
       show-details: when-authorized
+      # Explicit, not auto-detected. Spring Boot enables the liveness and
+      # readiness health groups automatically only when it believes it is
+      # running on Kubernetes (it looks for KUBERNETES_SERVICE_HOST). Without
+      # them, /actuator/health/liveness and /actuator/health/readiness return
+      # 404 — and a probe treats 404 exactly as it treats 500: pod not ready,
+      # rollout never completes.
+      #
+      # deployment_web.tf points its readiness, liveness and startup probes at
+      # those paths and the whole drain mechanism in Arch v4.0 §5.2 depends on
+      # readiness failing independently of liveness. That is too much to rest
+      # on an environment-variable heuristic, so the groups are turned on
+      # unconditionally. It also means they can be exercised locally.
+      probes:
+        enabled: true
   metrics:
     tags:
       application: ${spring.application.name}

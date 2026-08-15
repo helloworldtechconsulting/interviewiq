@@ -175,7 +175,23 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/companies/register").permitAll()
                         .requestMatchers("/api/v1/companies/check-slug").permitAll()
                         .requestMatchers("/api/v1/webhooks/**").permitAll()
-                        .requestMatchers("/actuator/health", "/actuator/info").permitAll()
+                        // /actuator/health/** and not just /actuator/health.
+                        // requestMatchers does not match sub-paths, so the
+                        // liveness and readiness groups the Kubernetes probes
+                        // actually call (see deployment_web.tf) were returning
+                        // 401. A probe treats anything outside 2xx/3xx as a
+                        // failure, so no pod would ever have become ready and
+                        // no rollout would ever have completed.
+                        //
+                        // /actuator/prometheus for the same reason on the
+                        // scrape path: the monitoring stack would have
+                        // collected nothing.
+                        //
+                        // Safe to permit for the same documented reason as
+                        // /internal/** below: the ingress routes only /ws and
+                        // /api, so nothing under /actuator is reachable from
+                        // outside the cluster.
+                        .requestMatchers("/actuator/health/**", "/actuator/info", "/actuator/prometheus").permitAll()
                         // Kubernetes probes and the preStop drain hook. Reachable
                         // only from inside the cluster — /internal/** is not
                         // exposed through the ingress (see the workload module),

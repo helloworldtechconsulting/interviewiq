@@ -9,6 +9,7 @@ import jakarta.mail.internet.MimeMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.io.ByteArrayResource;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
@@ -102,11 +103,22 @@ public class EmailService {
     private final EmailEventRepository   emailEventRepository;
     private final EmailSuppressionService suppressionService;
 
-    public EmailService(JavaMailSender mailSender,
+    /**
+     * {@code JavaMailSender} is injected through an {@link ObjectProvider}
+     * because Spring Boot only autoconfigures it when {@code spring.mail.host}
+     * is set. The staging and prod profiles set it; the local profile does not,
+     * and does not need to — {@code use-local-stub} exists precisely so a
+     * developer can run the application without an SMTP account.
+     *
+     * <p>Requiring the bean outright meant the local profile could not start at
+     * all: the context failed on this constructor long before any code checked
+     * the stub flag. Nothing caught it, because no test loads the full context.
+     */
+    public EmailService(ObjectProvider<JavaMailSender> mailSenderProvider,
                         MailProperties mailProperties,
                         EmailEventRepository emailEventRepository,
                         EmailSuppressionService suppressionService) {
-        this.mailSender           = mailSender;
+        this.mailSender           = mailSenderProvider.getIfAvailable();
         this.mailProperties       = mailProperties;
         this.emailEventRepository = emailEventRepository;
         this.suppressionService   = suppressionService;
@@ -394,6 +406,18 @@ public class EmailService {
             event.setStatus(EmailStatus.SENT);
             event.setProviderMessageId("stub-" + UUID.randomUUID());
             event.setSentAt(OffsetDateTime.now(ZoneOffset.UTC));
+            emailEventRepository.save(event);
+            return;
+        }
+
+        if (mailSender == null) {
+            // Reachable only on a profile that configured neither spring.mail.host
+            // nor use-local-stub. Recorded as FAILED with an explicit reason
+            // rather than throwing an NPE from somewhere deeper.
+            log.error("Cannot send email: no JavaMailSender is configured and "
+                    + "app.mail.use-local-stub is false. Set spring.mail.host. to={} type={}",
+                    recipientLower, emailType);
+            event.setStatus(EmailStatus.FAILED);
             emailEventRepository.save(event);
             return;
         }

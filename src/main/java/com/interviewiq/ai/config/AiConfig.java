@@ -73,9 +73,23 @@ public class AiConfig {
     /**
      * The second opinion for shadow mode (§13.1).
      *
-     * <p>Returns null when shadow mode is off, so the bean exists for injection
-     * but the shadow path is skipped — the alternative, a conditional bean, makes
-     * every injection point optional for a flag that flips once.
+     * <p>Returns null when shadow mode is off, which means <strong>no bean is
+     * registered at all</strong> — Spring treats a null-returning {@code @Bean}
+     * method as "no such bean", not as "a bean whose value is null".
+     *
+     * <p>This comment previously claimed the opposite: that "the bean exists for
+     * injection but the shadow path is skipped". It does not, and the
+     * consequence was total — with {@code shadow-evaluation: false}, which is
+     * the default, {@code EvaluationService}'s constructor could not be
+     * satisfied and <em>the application did not start</em>. It went unnoticed
+     * because no test loads the full Spring context: the integration tests are
+     * {@code @DataJpaTest} slices that never see this configuration.
+     *
+     * <p>The injection point in {@code EvaluationService} is therefore an
+     * {@code ObjectProvider}, which tolerates the absent bean. Keeping the null
+     * return is still the right shape — a conditional bean would put an
+     * {@code @ConditionalOnProperty} in front of a flag that flips once — but
+     * only now that the consumer actually handles it.
      */
     @Bean(SHADOW_CLIENT)
     public ChatClient shadowEvaluationChatClient() {
