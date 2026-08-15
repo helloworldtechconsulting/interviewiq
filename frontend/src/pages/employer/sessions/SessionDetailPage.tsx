@@ -1,7 +1,7 @@
 // =============================================================================
 // SessionDetailPage.tsx
 //
-// Shows session status, set meet URL, cancel, and (when COMPLETED) the full
+// Shows session status, cancel, and (when COMPLETED) the full
 // AI evaluation: radar chart, overall score, recommendation, strengths,
 // improvements, and per-question breakdown.
 // =============================================================================
@@ -9,9 +9,6 @@
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
 import { toast } from "sonner";
 import {
   RadarChart,
@@ -22,7 +19,6 @@ import {
 } from "recharts";
 import {
   ArrowLeft,
-  Link2,
   XCircle,
   Loader2,
   CheckCircle2,
@@ -39,20 +35,10 @@ import { PageHeader } from "@/components/common/PageHeader";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { EmptyState } from "@/components/common/EmptyState";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { Badge } from "@/components/ui/badge";
 import { cn, formatDateTime } from "@/lib/utils";
 import type { EvaluationQuestion } from "@/types";
-
-// ── Set meet URL schema ───────────────────────────────────────────────────────
-
-const meetUrlSchema = z.object({
-  meetUrl: z.string().url("Please enter a valid meeting URL"),
-});
-type MeetUrlForm = z.infer<typeof meetUrlSchema>;
 
 // ── Recommendation badge ──────────────────────────────────────────────────────
 
@@ -174,33 +160,6 @@ export function SessionDetailPage() {
     retry: false,
   });
 
-  // ── Meet URL form ──────────────────────────────────────────────────────────
-
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-  } = useForm<MeetUrlForm>({
-    resolver: zodResolver(meetUrlSchema),
-    defaultValues: { meetUrl: session?.googleMeetUrl ?? "" },
-  });
-
-  const meetUrlMutation = useMutation({
-    mutationFn: (data: MeetUrlForm) =>
-      sessionsApi.setMeetUrl(sessionId!, { meetUrl: data.meetUrl }),
-    onSuccess() {
-      toast.success("Meeting URL saved.");
-      void qc.invalidateQueries({
-        queryKey: queryKeys.sessions.detail(sessionId!),
-      });
-    },
-    onError(error) {
-      toast.error(
-        error instanceof AppError ? error.message : "Could not save URL.",
-      );
-    },
-  });
-
   const cancelMutation = useMutation({
     mutationFn: () => sessionsApi.cancel(sessionId!),
     onSuccess() {
@@ -250,7 +209,6 @@ export function SessionDetailPage() {
     : [];
 
   const canCancel = session.status === "INVITED" || session.status === "STARTED";
-  const canSetUrl = session.status === "INVITED";
 
   return (
     <div className="space-y-6">
@@ -340,81 +298,10 @@ export function SessionDetailPage() {
                     </dd>
                   </div>
                 )}
-                {session.recallBotId && (
-                  <div className="flex items-start justify-between gap-2">
-                    <dt className="text-muted-foreground">Bot ID</dt>
-                    <dd className="break-all text-right font-mono text-xs">
-                      {session.recallBotId}
-                    </dd>
-                  </div>
-                )}
               </dl>
             </CardContent>
           </Card>
 
-          {/* Meet URL */}
-          {canSetUrl && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Meeting Link</CardTitle>
-              </CardHeader>
-              <Separator />
-              <CardContent className="pt-4">
-                <p className="mb-3 text-sm text-muted-foreground">
-                  Paste your Google Meet, Zoom, or Teams link. The AI bot will
-                  join this URL at the scheduled time.
-                </p>
-                <form
-                  onSubmit={handleSubmit((d) => meetUrlMutation.mutate(d))}
-                  className="space-y-2"
-                >
-                  <Label htmlFor="meetUrl">Meeting URL</Label>
-                  <Input
-                    id="meetUrl"
-                    type="url"
-                    placeholder="https://meet.google.com/..."
-                    defaultValue={session.googleMeetUrl ?? ""}
-                    {...register("meetUrl")}
-                  />
-                  {errors.meetUrl && (
-                    <p className="text-xs text-destructive">
-                      {errors.meetUrl.message}
-                    </p>
-                  )}
-                  <Button
-                    type="submit"
-                    size="sm"
-                    className="w-full"
-                    disabled={meetUrlMutation.isPending}
-                  >
-                    {meetUrlMutation.isPending ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Link2 className="mr-2 h-4 w-4" />
-                    )}
-                    Save URL
-                  </Button>
-                </form>
-              </CardContent>
-            </Card>
-          )}
-
-          {session.googleMeetUrl && !canSetUrl && (
-            <Card>
-              <CardContent className="pt-4">
-                <p className="text-xs text-muted-foreground">Meeting URL</p>
-                <a
-                  href={session.googleMeetUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="mt-1 flex items-center gap-1 break-all text-sm text-primary hover:underline"
-                >
-                  <Link2 className="h-3.5 w-3.5 shrink-0" />
-                  {session.googleMeetUrl}
-                </a>
-              </CardContent>
-            </Card>
-          )}
         </div>
 
         {/* ── Evaluation ────────────────────────────────────────────────────── */}

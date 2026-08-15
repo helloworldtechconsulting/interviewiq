@@ -4,7 +4,6 @@ import type {
   Evaluation,
   Page,
   Session,
-  SetMeetUrlRequest,
 } from "@/types";
 
 const BASE = "/api/v1/sessions";
@@ -22,11 +21,6 @@ export const sessionsApi = {
 
   create: (data: CreateSessionRequest) =>
     apiClient.post<Session>(BASE, data).then((r) => r.data),
-
-  setMeetUrl: (sessionId: string, data: SetMeetUrlRequest) =>
-    apiClient
-      .patch<Session>(`${BASE}/${sessionId}/meet-url`, data)
-      .then((r) => r.data),
 
   cancel: (sessionId: string) =>
     apiClient

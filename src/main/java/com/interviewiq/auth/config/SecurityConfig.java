@@ -145,7 +145,7 @@ public class SecurityConfig {
      * <p>Public paths:
      * <ul>
      *   <li>{@code /api/v1/auth/**} — login, register, OTP, Google OAuth, password reset</li>
-     *   <li>{@code /api/v1/webhooks/**} — Razorpay + Recall.ai; HMAC-verified at service layer</li>
+     *   <li>{@code /api/v1/webhooks/**} — Razorpay + SMTP bounce callbacks; HMAC-verified at service layer</li>
      *   <li>{@code /actuator/health}, {@code /actuator/info} — load-balancer probes</li>
      * </ul>
      */

@@ -3,7 +3,7 @@ package com.interviewiq.shared.exception;
 import org.springframework.http.HttpStatus;
 
 /**
- * Base class for failures caused by third-party services (Recall.ai, OpenAI,
+ * Base class for failures caused by third-party services (OpenAI, Anthropic,
  * Razorpay, AWS, etc.).
  *
  * <p>Maps to HTTP 502 Bad Gateway by default, indicating that the InterviewIQ
@@ -13,7 +13,6 @@ import org.springframework.http.HttpStatus;
  * <ul>
  *   <li>{@link AiServiceException}      — OpenAI / Spring AI failures</li>
  *   <li>{@link PaymentServiceException} — Razorpay failures</li>
- *   <li>{@link BotServiceException}     — Recall.ai failures</li>
  *   <li>{@link StorageServiceException} — AWS S3 / storage failures</li>
  * </ul>
  *

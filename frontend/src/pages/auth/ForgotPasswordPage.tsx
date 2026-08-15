@@ -49,7 +49,7 @@ export function ForgotPasswordPage() {
   } = useForm<FormData>({ resolver: zodResolver(schema) });
 
   const mutation = useMutation({
-    mutationFn: authApi.forgotPassword,
+    mutationFn: (data: FormData) => authApi.forgotPassword(data),
     onSuccess(_, variables) {
       setSubmittedEmail(variables.email);
       setSubmitted(true);

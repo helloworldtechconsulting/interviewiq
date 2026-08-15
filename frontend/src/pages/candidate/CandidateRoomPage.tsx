@@ -37,15 +37,8 @@ import {
 import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { cn, formatDateTime } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import type { InterviewQuestion } from "@/types";
-
-declare global {
-  interface Window {
-    SpeechRecognition: typeof SpeechRecognition;
-    webkitSpeechRecognition: typeof SpeechRecognition;
-  }
-}
 
 function checkBrowserSupport(): string | null {
   if (!navigator.mediaDevices?.getUserMedia) return "Camera/microphone access is not supported in this browser.";
@@ -333,7 +326,7 @@ export function CandidateRoomPage() {
   const streamRef = useRef<MediaStream | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-  const recognitionRef = useRef<InstanceType<typeof SpeechRecognition> | null>(null);
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
   const synthRef = useRef(window.speechSynthesis);
 
   const [questions, setQuestions] = useState<InterviewQuestion[]>([]);
@@ -978,13 +971,14 @@ export function CandidateRoomPage() {
             )}
           </div>
 
+          {/*
+            No UPLOADING check here: the component returns early for that phase
+            further up, so by this point the phase can only be SPEAKING,
+            LISTENING or REVIEWING.
+          */}
           <Button
             onClick={handleNextQuestion}
-            disabled={
-              state.isSpeaking ||
-              state.phase === "UPLOADING" ||
-              completeMutation.isPending
-            }
+            disabled={state.isSpeaking || completeMutation.isPending}
             className="min-w-36"
           >
             {completeMutation.isPending ? (

@@ -201,17 +201,10 @@
             <artifactId>ses</artifactId>
         </dependency>
 
-        <!-- ── AWS SDK v2: Transcribe Streaming ──────────────── -->
-        <dependency>
-            <groupId>software.amazon.awssdk</groupId>
-            <artifactId>transcribestreaming</artifactId>
-        </dependency>
-
-        <!-- ── AWS SDK v2: Polly ─────────────────────────────── -->
-        <dependency>
-            <groupId>software.amazon.awssdk</groupId>
-            <artifactId>polly</artifactId>
-        </dependency>
+        <!-- Transcribe Streaming and Polly were removed with the March design:  -->
+        <!-- speech-to-text and text-to-speech both run in the candidate's        -->
+        <!-- browser via the Web Speech API (PRD v2.1 §7.5.2). No server-side     -->
+        <!-- media processing exists anywhere in this application.                -->
 
         <!-- ── Apache Tika: document text extraction ─────────── -->
         <!--    tika-core: lightweight API + AutoDetectParser      -->
