@@ -63,8 +63,12 @@ public class SessionExpiryJob {
         int failed = 0;
 
         while (true) {
-            List<InterviewSession> batch = sessionRepository.findByStatusAndInviteExpiresAtBefore(
-                    SessionStatus.INVITED, now, PageRequest.of(0, PAGE_SIZE)).getContent();
+            // Both INVITED and SCHEDULED lapse. SCHEDULED is new in v2.1: a
+            // candidate who booked a time and never showed up still has an invite
+            // that expires, and their capacity buckets must be freed (§7.4.4).
+            List<InterviewSession> batch = sessionRepository.findByStatusInAndInviteExpiresAtBefore(
+                    List.of(SessionStatus.INVITED, SessionStatus.SCHEDULED),
+                    now, PageRequest.of(0, PAGE_SIZE)).getContent();
 
             if (batch.isEmpty()) {
                 break;

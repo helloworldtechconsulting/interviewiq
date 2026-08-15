@@ -8,6 +8,7 @@ import com.interviewiq.job.domain.JobOpening;
 import com.interviewiq.job.infrastructure.JobOpeningRepository;
 import com.interviewiq.session.domain.InterviewSession;
 import com.interviewiq.session.infrastructure.InterviewSessionRepository;
+import com.interviewiq.shared.config.WorkerProperties;
 import com.interviewiq.shared.domain.PipelineStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,6 +19,8 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 /**
@@ -55,6 +58,7 @@ public class QuestionGenerationWorker {
     private final InterviewSessionRepository sessionRepository;
     private final JobOpeningRepository       jobOpeningRepository;
     private final CandidateRepository        candidateRepository;
+    private final WorkerProperties           workerProperties;
     private final ChatClient                 chatClient;
     private final ObjectMapper               objectMapper;
 
@@ -69,11 +73,13 @@ public class QuestionGenerationWorker {
     public QuestionGenerationWorker(InterviewSessionRepository sessionRepository,
                                     JobOpeningRepository jobOpeningRepository,
                                     CandidateRepository candidateRepository,
+                                    WorkerProperties workerProperties,
                                     ChatClient chatClient,
                                     ObjectMapper objectMapper) {
         this.sessionRepository    = sessionRepository;
         this.jobOpeningRepository = jobOpeningRepository;
         this.candidateRepository  = candidateRepository;
+        this.workerProperties     = workerProperties;
         this.chatClient           = chatClient;
         this.objectMapper         = objectMapper;
     }
@@ -82,35 +88,50 @@ public class QuestionGenerationWorker {
      * Poll for PENDING + IN_PROGRESS sessions and generate questions.
      * Runs every 20 seconds after an initial 20-second warm-up.
      *
-     * <p>IN_PROGRESS items are included for crash recovery. Safe because
-     * {@code fixedDelay} prevents concurrent scheduler runs within a single JVM.
+     * <p>Claims a bounded, distinct batch per pod with {@code FOR UPDATE SKIP
+     * LOCKED} (PRD v2.1 §7.9). Previously this fetched every PENDING and
+     * IN_PROGRESS row with a plain derived query, which was correct on exactly
+     * one instance — on six pods it meant six pods generating questions for the
+     * same session and paying the LLM bill six times.
+     *
+     * <p>Staleness recovery is handled inside the claim rather than by sweeping
+     * IN_PROGRESS rows unconditionally, which on more than one pod meant
+     * reprocessing work another pod was actively doing.
      */
     @Scheduled(initialDelayString = "PT20S", fixedDelayString = "PT20S")
     public void generatePendingQuestions() {
-        List<InterviewSession> workItems =
-                sessionRepository.findAllByQuestionGenerationStatusIn(
-                        List.of(PipelineStatus.PENDING, PipelineStatus.IN_PROGRESS));
+        OffsetDateTime staleBefore =
+                OffsetDateTime.now(ZoneOffset.UTC).minus(workerProperties.getStaleClaimAfter());
 
-        if (workItems.isEmpty()) return;
+        List<InterviewSession> claimed = sessionRepository.claimForQuestionGeneration(
+                workerProperties.getQuestionGenerationBatchSize(), staleBefore);
 
-        log.debug("QuestionGenerationWorker: processing {} session(s) (PENDING + IN_PROGRESS recovery)",
-                workItems.size());
+        if (claimed.isEmpty()) return;
 
-        for (InterviewSession session : workItems) {
+        log.debug("QuestionGenerationWorker: claimed {} session(s)", claimed.size());
+
+        for (InterviewSession session : claimed) {
             self.generateForSession(session);  // call through proxy so @Transactional applies
         }
     }
 
+    /**
+     * Generates questions for one already-claimed session.
+     *
+     * <p>The claim has already marked this session IN_PROGRESS under a row lock,
+     * so this method does not need to — and must not, because re-marking would
+     * reset the claim timestamp and make the row look perpetually fresh to the
+     * staleness sweep.
+     */
     @Transactional
     public void generateForSession(InterviewSession session) {
-        // Mark IN_PROGRESS to prevent duplicate processing
-        session.setQuestionGenerationStatus(PipelineStatus.IN_PROGRESS);
-        sessionRepository.save(session);
-
         try {
             String questionsJson = callLlm(session);
             session.setQuestionsJson(questionsJson);
             session.setQuestionGenerationStatus(PipelineStatus.DONE);
+            // Stamps the readiness gate (§7.4.3): "Start now" becomes available
+            // to the candidate the moment this is set.
+            session.setQuestionsReadyAt(OffsetDateTime.now(ZoneOffset.UTC));
             sessionRepository.save(session);
 
             log.info("QuestionGenerationWorker: generated questions for sessionId={}", session.getId());

@@ -5,8 +5,12 @@ import com.interviewiq.shared.domain.PipelineStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.util.Collection;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -32,4 +36,28 @@ public interface CandidateRepository extends JpaRepository<Candidate, UUID> {
     List<Candidate> findAllByResumeExtractionStatusInAndResumeS3KeyIsNotNull(Collection<PipelineStatus> statuses);
 
     Optional<Candidate> findByGoogleSubject(String googleSubject);
+
+    /**
+     * Atomically claims candidates whose résumé text needs extracting.
+     * Same {@code FOR UPDATE SKIP LOCKED} discipline as every other poller (§7.9).
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(value = """
+           UPDATE candidates
+           SET resume_extraction_status     = 'IN_PROGRESS',
+               resume_extraction_claimed_at = now(),
+               updated_at                   = now()
+           WHERE id IN (
+               SELECT id FROM candidates
+               WHERE resume_s3_key IS NOT NULL
+                 AND (resume_extraction_status = 'PENDING'
+                      OR (resume_extraction_status = 'IN_PROGRESS' AND resume_extraction_claimed_at < :staleBefore))
+               ORDER BY created_at ASC
+               LIMIT :batchSize
+               FOR UPDATE SKIP LOCKED
+           )
+           RETURNING *
+           """, nativeQuery = true)
+    List<Candidate> claimForResumeExtraction(@Param("batchSize") int batchSize,
+                                             @Param("staleBefore") OffsetDateTime staleBefore);
 }

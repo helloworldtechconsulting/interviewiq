@@ -2,6 +2,7 @@ package com.interviewiq.job.service;
 
 import com.interviewiq.job.domain.JobOpening;
 import com.interviewiq.job.infrastructure.JobOpeningRepository;
+import com.interviewiq.shared.config.WorkerProperties;
 import com.interviewiq.shared.domain.PipelineStatus;
 import com.interviewiq.storage.service.StorageService;
 import org.apache.tika.exception.TikaException;
@@ -19,6 +20,8 @@ import org.xml.sax.SAXException;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 /**
@@ -57,6 +60,7 @@ public class JdExtractionWorker {
 
     private final JobOpeningRepository jobOpeningRepository;
     private final StorageService       storageService;
+    private final WorkerProperties     workerProperties;
 
     /**
      * Self-reference injected lazily to ensure calls to {@link #extractSingle} go through
@@ -67,9 +71,11 @@ public class JdExtractionWorker {
     private JdExtractionWorker self;
 
     public JdExtractionWorker(JobOpeningRepository jobOpeningRepository,
-                               StorageService storageService) {
+                               StorageService storageService,
+                               WorkerProperties workerProperties) {
         this.jobOpeningRepository = jobOpeningRepository;
         this.storageService       = storageService;
+        this.workerProperties     = workerProperties;
     }
 
     /**
@@ -84,16 +90,19 @@ public class JdExtractionWorker {
      */
     @Scheduled(initialDelayString = "PT10S", fixedDelayString = "PT30S")
     public void extractPendingJds() {
-        List<JobOpening> workItems = jobOpeningRepository
-                .findAllByJdExtractionStatusInAndJdS3KeyIsNotNull(
-                        List.of(PipelineStatus.PENDING, PipelineStatus.IN_PROGRESS));
+        OffsetDateTime staleBefore =
+                OffsetDateTime.now(ZoneOffset.UTC).minus(workerProperties.getStaleClaimAfter());
 
-        if (workItems.isEmpty()) return;
+        // Claims a distinct, bounded batch per pod (PRD v2.1 §7.9). The previous
+        // derived query returned the same rows on every pod.
+        List<JobOpening> claimed = jobOpeningRepository.claimForJdExtraction(
+                workerProperties.getExtractionBatchSize(), staleBefore);
 
-        log.debug("JdExtractionWorker: processing {} JD(s) (PENDING + IN_PROGRESS recovery)",
-                workItems.size());
+        if (claimed.isEmpty()) return;
 
-        for (JobOpening job : workItems) {
+        log.debug("JdExtractionWorker: claimed {} JD(s)", claimed.size());
+
+        for (JobOpening job : claimed) {
             self.extractSingle(job);  // call through proxy so @Transactional applies
         }
     }
