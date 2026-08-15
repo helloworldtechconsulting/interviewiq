@@ -48,6 +48,111 @@ public interface InterviewSessionRepository extends JpaRepository<InterviewSessi
     /** Whether the candidate has a session in any of the given states. */
     boolean existsByCandidateIdAndStatusIn(UUID candidateId, Collection<SessionStatus> statuses);
 
+    // ── Dashboard counters (INTIQ-73) ────────────────────────────────────────
+
+    long countByCompanyIdAndStatus(UUID companyId, SessionStatus status);
+
+    long countByCompanyIdAndStatusIn(UUID companyId, Collection<SessionStatus> statuses);
+
+    /** No-shows over a rolling window — the all-time total is not actionable. */
+    long countByCompanyIdAndStatusAndCreatedAtAfter(
+            UUID companyId, SessionStatus status, OffsetDateTime since);
+
+    /**
+     * Atomically claims scheduled sessions that are due a reminder, stamping the
+     * send timestamp in the same statement.
+     *
+     * <p>Two mechanisms, doing two different jobs. {@code SKIP LOCKED} stops two
+     * pods claiming the same row in the same pass. The {@code IS NULL} predicate
+     * plus the stamp is what stops a <em>resend</em> — without it, a pod that
+     * died after sending and before committing would send again on recovery, and
+     * so would every subsequent pass.
+     *
+     * <p>Getting this wrong is not a silent duplicate-work bug like double
+     * evaluation: it puts six copies of "your interview is in one hour" into a
+     * candidate's inbox and damages sender reputation, which outlasts the fix.
+     *
+     * <p>{@code dueBefore} is the cutoff — the sweep passes {@code now + 24h} for
+     * the day-before reminder and {@code now + 1h} for the hour-before one.
+     * Sessions already past their start time are excluded: a reminder for an
+     * interview that should already have begun is worse than no reminder.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(value = """
+           UPDATE interview_sessions
+           SET reminder_24h_sent_at = now(),
+               updated_at           = now()
+           WHERE id IN (
+               SELECT id FROM interview_sessions
+               WHERE status = 'SCHEDULED'
+                 AND reminder_24h_sent_at IS NULL
+                 AND scheduled_start_at <= :dueBefore
+                 AND scheduled_start_at >  :now
+               ORDER BY scheduled_start_at ASC
+               LIMIT :batchSize
+               FOR UPDATE SKIP LOCKED
+           )
+           RETURNING *
+           """, nativeQuery = true)
+    List<InterviewSession> claimDueFor24hReminder(@Param("now") OffsetDateTime now,
+                                                  @Param("dueBefore") OffsetDateTime dueBefore,
+                                                  @Param("batchSize") int batchSize);
+
+    /** T-1h counterpart of {@link #claimDueFor24hReminder}. */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(value = """
+           UPDATE interview_sessions
+           SET reminder_1h_sent_at = now(),
+               updated_at          = now()
+           WHERE id IN (
+               SELECT id FROM interview_sessions
+               WHERE status = 'SCHEDULED'
+                 AND reminder_1h_sent_at IS NULL
+                 AND scheduled_start_at <= :dueBefore
+                 AND scheduled_start_at >  :now
+               ORDER BY scheduled_start_at ASC
+               LIMIT :batchSize
+               FOR UPDATE SKIP LOCKED
+           )
+           RETURNING *
+           """, nativeQuery = true)
+    List<InterviewSession> claimDueFor1hReminder(@Param("now") OffsetDateTime now,
+                                                 @Param("dueBefore") OffsetDateTime dueBefore,
+                                                 @Param("batchSize") int batchSize);
+
+    /**
+     * Atomically claims scheduled sessions whose grace window has elapsed
+     * without the candidate arriving.
+     *
+     * <p>Claimed by moving straight to {@code NO_SHOW}, so a second pod's
+     * {@code status = 'SCHEDULED'} predicate no longer matches. That matters more
+     * here than for reminders: each claimed row releases a ₹100 reservation, and
+     * releasing twice credits a company for money it only ever reserved once —
+     * the same defect class as the {@code SessionExpiryService} double-release.
+     *
+     * <p>The session is <em>not</em> settled. A no-show is not charged (§7.4.5):
+     * no interview happened, no evaluation ran, and no cost was incurred beyond
+     * question generation.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(value = """
+           UPDATE interview_sessions
+           SET status     = 'NO_SHOW',
+               ended_at   = now(),
+               updated_at = now()
+           WHERE id IN (
+               SELECT id FROM interview_sessions
+               WHERE status = 'SCHEDULED'
+                 AND scheduled_start_at < :graceCutoff
+               ORDER BY scheduled_start_at ASC
+               LIMIT :batchSize
+               FOR UPDATE SKIP LOCKED
+           )
+           RETURNING *
+           """, nativeQuery = true)
+    List<InterviewSession> claimNoShows(@Param("graceCutoff") OffsetDateTime graceCutoff,
+                                        @Param("batchSize") int batchSize);
+
     Optional<InterviewSession> findByInviteTokenHash(String inviteTokenHash);
 
     Page<InterviewSession> findByStatusAndInviteExpiresAtBefore(

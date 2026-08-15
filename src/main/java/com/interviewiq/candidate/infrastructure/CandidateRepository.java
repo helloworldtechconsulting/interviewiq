@@ -26,6 +26,9 @@ public interface CandidateRepository extends JpaRepository<Candidate, UUID> {
 
     boolean existsByJobOpeningIdAndEmail(UUID jobOpeningId, String email);
 
+    /** Dashboard counter (INTIQ-73). */
+    long countByCompanyId(UUID companyId);
+
     /**
      * Candidate listing with optional job, résumé-status and free-text filters,
      * evaluated in the database.

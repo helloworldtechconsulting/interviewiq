@@ -8,6 +8,12 @@ import com.interviewiq.billing.dto.TopUpResponse;
 import com.interviewiq.billing.dto.WalletResponse;
 import com.interviewiq.billing.infrastructure.WalletRepository;
 import com.interviewiq.billing.infrastructure.WalletTransactionRepository;
+import com.interviewiq.auth.domain.User;
+import com.interviewiq.auth.domain.UserRole;
+import com.interviewiq.auth.infrastructure.UserRepository;
+import com.interviewiq.company.domain.Company;
+import com.interviewiq.company.infrastructure.CompanyRepository;
+import com.interviewiq.email.service.EmailService;
 import com.interviewiq.shared.config.RazorpayProperties;
 import com.interviewiq.audit.annotation.Auditable;
 import com.interviewiq.shared.config.BillingProperties;
@@ -23,11 +29,18 @@ import com.razorpay.RazorpayException;
 import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import java.nio.charset.StandardCharsets;
+import java.security.InvalidKeyException;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.UUID;
@@ -65,17 +78,29 @@ public class WalletService {
     private final RazorpayClient              razorpayClient;
     private final RazorpayProperties          razorpayProps;
     private final BillingProperties           billingProperties;
+    private final UserRepository              userRepository;
+    private final CompanyRepository           companyRepository;
+    private final EmailService                emailService;
+
+    @Value("${app.frontend.base-url:https://app.interviewiq.in}")
+    private String frontendBaseUrl;
 
     public WalletService(WalletRepository walletRepository,
                          WalletTransactionRepository txRepository,
                          RazorpayClient razorpayClient,
                          RazorpayProperties razorpayProps,
-                         BillingProperties billingProperties) {
+                         BillingProperties billingProperties,
+                         UserRepository userRepository,
+                         CompanyRepository companyRepository,
+                         EmailService emailService) {
         this.walletRepository  = walletRepository;
         this.txRepository      = txRepository;
         this.razorpayClient    = razorpayClient;
         this.razorpayProps     = razorpayProps;
         this.billingProperties = billingProperties;
+        this.userRepository    = userRepository;
+        this.companyRepository = companyRepository;
+        this.emailService      = emailService;
     }
 
     // =========================================================================
@@ -152,6 +177,92 @@ public class WalletService {
         }
     }
 
+    /**
+     * Credits the wallet from the browser's checkout callback, after verifying
+     * Razorpay's signature (INTIQ-66).
+     *
+     * <p><strong>Why this exists when the webhook already credits.</strong> The
+     * webhook is authoritative but asynchronous — it can arrive seconds or
+     * minutes after the customer's payment succeeds. Until then the customer is
+     * looking at a balance that has not moved, having just been charged. That is
+     * the moment people email support, or pay twice.
+     *
+     * <p>This does not replace the webhook. It races it, and whichever arrives
+     * first credits the wallet; the other becomes a no-op because
+     * {@link #confirmTopUp} is idempotent on the Razorpay order id. Removing the
+     * webhook and trusting only this would be wrong — a customer who closes the
+     * tab during redirect would never be credited at all.
+     *
+     * <p><strong>The signature check is the whole security of this endpoint.</strong>
+     * The payload comes from the browser, so without verification any
+     * authenticated user could POST an arbitrary order id and mint themselves
+     * credit. Razorpay signs {@code order_id|payment_id} with the key secret;
+     * only someone holding that secret can produce a valid signature. Verified
+     * with a constant-time comparison, and refused outright when no secret is
+     * configured — the same fail-closed rule as the webhook (INTIQ-34), for the
+     * same reason.
+     *
+     * @throws ValidationException if the signature does not verify
+     */
+    @Transactional
+    public WalletResponse verifyAndCreditTopUp(String razorpayOrderId,
+                                               String razorpayPaymentId,
+                                               String razorpaySignature) {
+        UUID companyId = SecurityContext.requireCompanyId();
+
+        String secret = razorpayProps.getKeySecret();
+        if (secret == null || secret.isBlank()) {
+            log.error("Top-up verification refused: Razorpay key secret is not configured");
+            throw new ValidationException("Payment verification is unavailable. Please contact support.");
+        }
+        if (razorpayOrderId == null || razorpayPaymentId == null || razorpaySignature == null) {
+            throw new ValidationException("Payment confirmation is incomplete.");
+        }
+
+        String expected = hmacSha256Hex(razorpayOrderId + "|" + razorpayPaymentId, secret);
+        if (!MessageDigest.isEqual(
+                expected.getBytes(StandardCharsets.UTF_8),
+                razorpaySignature.getBytes(StandardCharsets.UTF_8))) {
+            log.warn("Top-up verification failed: signature mismatch companyId={} orderId={}",
+                    companyId, razorpayOrderId);
+            throw new ValidationException("This payment could not be verified.");
+        }
+
+        // The amount is taken from the order we created, never from the request.
+        // A verified signature proves the payment is genuine; it does not prove
+        // the caller told us the right amount.
+        long amountPaise = fetchOrderAmount(razorpayOrderId);
+
+        confirmTopUp(razorpayOrderId, amountPaise, companyId);
+        return getBalance();
+    }
+
+    /** Reads the authoritative order amount back from Razorpay. */
+    private long fetchOrderAmount(String razorpayOrderId) {
+        try {
+            Order order = razorpayClient.orders.fetch(razorpayOrderId);
+            return ((Number) order.get("amount")).longValue();
+        } catch (RazorpayException e) {
+            log.error("Could not fetch Razorpay order for verification: orderId={}", razorpayOrderId, e);
+            throw new ExternalServiceException("Payment gateway error. Your payment will be credited shortly.");
+        }
+    }
+
+    private static String hmacSha256Hex(String payload, String secret) {
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            byte[] digest = mac.doFinal(payload.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(digest.length * 2);
+            for (byte b : digest) {
+                hex.append(String.format("%02x", b));
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException | InvalidKeyException e) {
+            throw new IllegalStateException("HMAC-SHA256 unavailable", e);
+        }
+    }
+
     // =========================================================================
     // Webhook-driven confirmation (called by WebhookService)
     // =========================================================================
@@ -174,6 +285,10 @@ public class WalletService {
 
         Wallet wallet = lockWallet(companyId);
         wallet.setBalancePaise(wallet.getBalancePaise() + amountPaise);
+        // Re-arm the low-balance warning in the same write. A company that tops
+        // up and later runs down again should be warned again; without clearing
+        // this they would be told once, ever.
+        wallet.setLowBalanceNotifiedAt(null);
         walletRepository.save(wallet);
 
         WalletTransaction tx = buildTransaction(wallet, null, TransactionType.TOPUP,
@@ -274,6 +389,63 @@ public class WalletService {
 
         log.info("Funds settled: companyId={} sessionId={} settledPaise={} fromPromo={} fromPaid={}",
                 companyId, sessionId, settledPaise, spend.fromPromo(), spend.fromPaid());
+
+        maybeWarnLowBalance(wallet);
+    }
+
+    /**
+     * Sends the low-balance warning if the wallet has just dropped to or below
+     * the threshold and has not already been warned (§7.7, §7.8.2, INTIQ-71).
+     *
+     * <p>Checked on settlement rather than on a schedule, because settlement is
+     * the only event that reduces the balance — a sweep would find the same
+     * companies repeatedly and tell them nothing new.
+     *
+     * <p><strong>Warn once per top-up cycle.</strong> The stamp is set here and
+     * cleared on top-up. Without it, a company sitting below the line would be
+     * emailed after every completed interview, and a warning that arrives on
+     * every event is a warning people filter — precisely when it matters most.
+     */
+    private void maybeWarnLowBalance(Wallet wallet) {
+        long remaining = wallet.getTotalBalancePaise();
+        if (remaining > billingProperties.getLowBalanceThresholdPaise()) {
+            return;
+        }
+        if (wallet.getLowBalanceNotifiedAt() != null) {
+            return;
+        }
+
+        try {
+            String recipient = adminEmailFor(wallet.getCompanyId());
+            if (recipient == null) {
+                return;
+            }
+            String companyName = companyRepository.findById(wallet.getCompanyId())
+                    .map(Company::getName)
+                    .orElse("Your company");
+
+            emailService.sendLowBalanceEmail(
+                    recipient, companyName, remaining,
+                    remaining / billingProperties.getSessionCostPaise(),
+                    frontendBaseUrl + "/billing",
+                    wallet.getCompanyId());
+
+            wallet.setLowBalanceNotifiedAt(OffsetDateTime.now(ZoneOffset.UTC));
+            walletRepository.save(wallet);
+
+        } catch (RuntimeException e) {
+            // Never fails the settlement. The interview is complete and the
+            // charge is correct; a missed warning email is not worth unwinding
+            // a billing transaction over.
+            log.warn("Low-balance notification failed: companyId={}", wallet.getCompanyId(), e);
+        }
+    }
+
+    /** First ADMIN on the company, which is who signed up and holds the card. */
+    private String adminEmailFor(UUID companyId) {
+        return userRepository.findFirstByCompanyIdAndRoleOrderByCreatedAtAsc(companyId, UserRole.ADMIN)
+                .map(User::getEmail)
+                .orElse(null);
     }
 
     /**

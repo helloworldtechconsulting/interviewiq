@@ -88,6 +88,36 @@ public interface EvaluationReportRepository extends JpaRepository<EvaluationRepo
     long countPendingWork();
 
     /**
+     * Completed reports the employer has never opened (§7.7, INTIQ-73).
+     *
+     * <p>Scoped to {@code DONE} on purpose: a report still generating is not
+     * something the recruiter is failing to read, and counting it would turn a
+     * backlog figure into a noise figure that never reaches zero.
+     */
+    @Query("""
+           SELECT COUNT(r) FROM EvaluationReport r
+           WHERE r.companyId = :companyId
+             AND r.generationStatus = com.interviewiq.shared.domain.PipelineStatus.DONE
+             AND r.viewedAt IS NULL
+           """)
+    long countUnreviewed(@Param("companyId") UUID companyId);
+
+    /**
+     * Completed reports whose overall score falls in an inclusive band, for the
+     * dashboard histogram.
+     */
+    @Query("""
+           SELECT COUNT(r) FROM EvaluationReport r
+           WHERE r.companyId = :companyId
+             AND r.overallScore IS NOT NULL
+             AND r.overallScore >= :lower
+             AND r.overallScore <= :upper
+           """)
+    long countInScoreBand(@Param("companyId") UUID companyId,
+                          @Param("lower") short lower,
+                          @Param("upper") short upper);
+
+    /**
      * Oldest unstarted evaluation, for the report-SLA alarm. The hard promise is
      * 30 minutes from session end (§8).
      */

@@ -27,6 +27,9 @@ public interface JobOpeningRepository extends JpaRepository<JobOpening, UUID> {
     /** Used by QuestionGenerationService to validate JD is ready before allowing session creation. */
     boolean existsByCompanyIdAndIdAndJdExtractionStatus(UUID companyId, UUID id, PipelineStatus status);
 
+    /** Dashboard counter — a COUNT, not a page of rows whose envelope gets read (INTIQ-73). */
+    long countByCompanyIdAndStatus(UUID companyId, JobStatus status);
+
     /**
      * Company job listing with optional status and free-text filters, applied in
      * the database rather than in the browser.

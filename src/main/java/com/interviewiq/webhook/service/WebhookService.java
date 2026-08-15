@@ -95,10 +95,10 @@ public class WebhookService {
 
         WebhookEvent event = persist(WebhookProvider.RAZORPAY, eventType, payloadJson, idempotencyKey, null);
 
-        if ("payment.captured".equals(eventType)) {
-            processRazorpayPaymentCaptured(root, event);
-        } else {
-            log.debug("Unhandled Razorpay event type: {}", eventType);
+        switch (eventType == null ? "" : eventType) {
+            case "payment.captured" -> processRazorpayPaymentCaptured(root, event);
+            case "payment.failed"   -> processRazorpayPaymentFailed(root, event);
+            default -> log.debug("Unhandled Razorpay event type: {}", eventType);
         }
 
         markProcessed(event);
@@ -128,6 +128,40 @@ public class WebhookService {
         event.setCompanyId(companyId);
         walletService.confirmTopUp(orderId, amount, companyId);
         log.info("Razorpay payment captured: orderId={} companyId={} amount={}", orderId, companyId, amount);
+    }
+
+    /**
+     * Records a failed payment attempt (INTIQ-71).
+     *
+     * <p><strong>No wallet mutation.</strong> A failed payment never created a
+     * credit, so there is nothing to reverse — treating this as a debit would be
+     * the actual bug. The value of handling the event at all is diagnostic: when
+     * a customer says "I paid and my balance did not change", the answer is
+     * either "your bank declined it, here is the reason code" or "we have a
+     * problem", and without this row there is no way to tell which.
+     *
+     * <p>The failure reason is stored on the webhook event rather than emailed to
+     * the customer. Razorpay already tells them at the point of failure, in the
+     * checkout flow, with better context than we have — a second message from us
+     * minutes later would add confusion, not clarity.
+     */
+    private void processRazorpayPaymentFailed(JsonNode root, WebhookEvent event) {
+        JsonNode payment = root.path("payload").path("payment").path("entity");
+        String orderId     = payment.path("order_id").asText("");
+        String errorCode   = payment.path("error_code").asText("");
+        String errorReason = payment.path("error_description").asText("");
+        String receiptId   = root.path("payload").path("order").path("entity").path("receipt").asText("");
+
+        if (receiptId.startsWith("topup-")) {
+            try {
+                event.setCompanyId(UUID.fromString(receiptId.substring(6)));
+            } catch (IllegalArgumentException e) {
+                log.warn("Could not parse companyId from failed-payment receipt: {}", receiptId);
+            }
+        }
+
+        log.warn("Razorpay payment failed: orderId={} companyId={} code={} reason={}",
+                orderId, event.getCompanyId(), errorCode, errorReason);
     }
 
     private boolean isDuplicate(WebhookProvider provider, String idempotencyKey) {

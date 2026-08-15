@@ -111,6 +111,16 @@ public class EvaluationReport {
     private String employerNotes;
 
     /**
+     * When an employer first opened this report, or null if nobody has.
+     *
+     * <p>Set once and never updated. "Last viewed" would answer a different
+     * question and would let a re-read make an already-actioned report look
+     * fresh again — the counter this feeds is a backlog, not an activity log.
+     */
+    @Column(name = "viewed_at")
+    private OffsetDateTime viewedAt;
+
+    /**
      * When the report became available. The report-ready SLA is measured from
      * session end to this timestamp — 30 minutes hard, ~5 minutes soft, median
      * under 2 (§8, §16).
@@ -200,6 +210,9 @@ public class EvaluationReport {
 
     public String getReportS3Key() { return reportS3Key; }
     public void setReportS3Key(String reportS3Key) { this.reportS3Key = reportS3Key; }
+
+    public OffsetDateTime getViewedAt() { return viewedAt; }
+    public void setViewedAt(OffsetDateTime viewedAt) { this.viewedAt = viewedAt; }
 
     public String getEmployerNotes() { return employerNotes; }
     public void setEmployerNotes(String employerNotes) { this.employerNotes = employerNotes; }
