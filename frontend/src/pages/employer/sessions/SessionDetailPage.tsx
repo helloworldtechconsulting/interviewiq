@@ -33,6 +33,7 @@ import { queryKeys } from "@/lib/queryKeys";
 import { AppError } from "@/api/client";
 import { PageHeader } from "@/components/common/PageHeader";
 import { StatusBadge } from "@/components/common/StatusBadge";
+import { EvidencePanel } from "./EvidencePanel";
 import { EmptyState } from "@/components/common/EmptyState";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -452,8 +453,21 @@ export function SessionDetailPage() {
                 </Card>
               </div>
 
-              {/* Question breakdown */}
-              {evaluation.questions.length > 0 && (
+              {/* ── Per-question narrative evidence (§7.6) ───────────────────
+                  Preferred over the plain question breakdown wherever it is
+                  present: it is what makes a score actionable, and what the
+                  PRD requires a report to carry. The older layout stays as a
+                  fallback for reports generated before v2.1. */}
+              {evaluation.evidence && (
+                <EvidencePanel
+                  evidence={evaluation.evidence}
+                  answers={evaluation.answers ?? []}
+                  partial={evaluation.partial}
+                />
+              )}
+
+              {/* Question breakdown — legacy reports only */}
+              {!evaluation.evidence && evaluation.questions.length > 0 && (
                 <Card>
                   <CardHeader>
                     <CardTitle className="text-base">

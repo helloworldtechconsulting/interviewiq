@@ -11,6 +11,7 @@ import { z } from "zod";
 import { toast } from "sonner";
 import {
   Plus,
+  Upload,
   Users,
   ChevronLeft,
   ChevronRight,
@@ -46,6 +47,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { formatDate } from "@/lib/utils";
+import { BulkImportDialog } from "./BulkImportDialog";
 
 const PAGE_SIZE = 12;
 
@@ -240,6 +242,7 @@ export function CandidatesPage() {
   const [jobIdFilter, setJobIdFilter] = useState(defaultJobId ?? "ALL");
   const [search, setSearch] = useState("");
   const [addOpen, setAddOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   // Fetch all open jobs for the filter dropdown
   const { data: jobsData } = useQuery({
@@ -279,10 +282,20 @@ export function CandidatesPage() {
         title="Candidates"
         description="Track every candidate through your hiring pipeline."
         actions={
-          <Button onClick={() => setAddOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            Add Candidate
-          </Button>
+          <div className="flex gap-2">
+            {/* Bulk import sits alongside single-add rather than replacing it:
+                §7.3.1 exists because "a recruiter running a hiring drive will not
+                add fifty candidates one at a time", but adding one still needs to
+                be one click. */}
+            <Button variant="outline" onClick={() => setImportOpen(true)}>
+              <Upload className="mr-2 h-4 w-4" />
+              Import CSV
+            </Button>
+            <Button onClick={() => setAddOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Add Candidate
+            </Button>
+          </div>
         }
       />
 
@@ -418,6 +431,29 @@ export function CandidatesPage() {
         onOpenChange={setAddOpen}
         defaultJobId={defaultJobId}
       />
+
+      <Dialog open={importOpen} onOpenChange={setImportOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Import candidates from a CSV</DialogTitle>
+          </DialogHeader>
+
+          {queryJobOpeningId ? (
+            <BulkImportDialog
+              jobOpeningId={queryJobOpeningId}
+              onClose={() => setImportOpen(false)}
+            />
+          ) : (
+            // An import always targets one opening: candidates belong to a job,
+            // and the whole-batch reservation is priced per interview for that
+            // job's tier. Asking here is clearer than importing into a guess.
+            <p className="py-6 text-sm text-muted-foreground">
+              Choose a job opening from the filter above first — candidates are imported
+              into a specific opening.
+            </p>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

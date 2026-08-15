@@ -30,6 +30,7 @@ import { queryKeys } from "@/lib/queryKeys";
 import { AppError } from "@/api/client";
 import { useAuthUser } from "@/stores/authStore";
 import { PageHeader } from "@/components/common/PageHeader";
+import { WalletBalance } from "@/components/common/WalletBalance";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -327,15 +328,7 @@ export function BillingPage() {
             {walletLoading ? (
               <div className="h-9 w-32 animate-pulse rounded bg-muted" />
             ) : (
-              <>
-                <p className="text-3xl font-bold">
-                  {wallet ? formatRupees(wallet.totalBalancePaise) : "—"}
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  ~{wallet ? Math.floor(wallet.totalBalancePaise / 5000) : 0} sessions
-                  remaining
-                </p>
-              </>
+              wallet && <WalletBalance wallet={wallet} />
             )}
             <Button
               className="mt-4 w-full"

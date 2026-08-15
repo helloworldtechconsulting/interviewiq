@@ -128,7 +128,13 @@ export function DashboardPage() {
           value={wallet ? formatRupees(wallet.totalBalancePaise) : "—"}
           sub={
             wallet
-              ? `~${Math.floor(wallet.totalBalancePaise / 5000)} sessions remaining`
+              ? // Rs.100 per completed interview at every tier (§7.8.1), and the
+                // promotional split is called out because free credit is spent
+                // first — a customer must never be surprised by which money moved.
+                `~${Math.floor(wallet.availablePaise / 10_000)} interviews left` +
+                (wallet.promoBalancePaise > 0
+                  ? ` · ${formatRupees(wallet.promoBalancePaise)} free credit`
+                  : "")
               : "Loading…"
           }
           icon={<TrendingUp className="h-4 w-4" />}

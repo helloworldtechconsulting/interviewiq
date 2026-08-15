@@ -79,6 +79,11 @@ const CandidateRoomPage = lazy(() =>
     default: m.CandidateRoomPage,
   })),
 );
+const CandidateSchedulingPage = lazy(() =>
+  import("@/pages/candidate/CandidateSchedulingPage").then((m) => ({
+    default: m.CandidateSchedulingPage,
+  })),
+);
 
 // ── Not found ─────────────────────────────────────────────────────────────────
 const NotFoundPage = lazy(() =>
@@ -169,6 +174,17 @@ export const router = createBrowserRouter([
   {
     element: <InterviewLayout />,
     children: [
+      // The invite link lands here first. PRD v2.1 §7.1.2: opening the link
+      // "validates the token and returns session details WITHOUT starting the
+      // interview — it shows the scheduling page".
+      {
+        path: "/interview/schedule",
+        element: <Lazy><CandidateSchedulingPage /></Lazy>,
+      },
+      {
+        path: "/interview/room",
+        element: <Lazy><CandidateRoomPage /></Lazy>,
+      },
       {
         path: "/interview/:sessionId",
         element: <Lazy><CandidateRoomPage /></Lazy>,
