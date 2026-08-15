@@ -41,11 +41,15 @@ spring:
     clean-on-validation-error: true
     clean-disabled: false
 
-  # ── Spring AI — stub key; no real OpenAI calls in local smoke test ─────────
-  #   Replace with a real key when testing the AI pipeline locally.
+  # ── Spring AI — stub keys; no real provider calls in local smoke test ─────
+  #   Both providers need a key at startup because both starters are on the
+  #   classpath (vendor is per-workflow config, not a build-time choice).
+  #   Replace with real keys when testing the AI pipeline locally.
   ai:
     openai:
       api-key: sk-local-dev-stub-key-replace-for-ai-testing
+    anthropic:
+      api-key: sk-ant-local-dev-stub-key-replace-for-ai-testing
 
   # ── JPA — verbose SQL for development debugging ───────────────────────────
   jpa:

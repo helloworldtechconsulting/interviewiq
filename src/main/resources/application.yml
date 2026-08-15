@@ -68,10 +68,13 @@ spring:
   # ── Spring AI ──────────────────────────────────────────────────────────────
   ai:
     openai:
-      chat:
-        options:
-          model: gpt-4o
-          temperature: 0.2
+      # Model and temperature are NOT set here. PRD v2.1 §9.1 makes vendor and
+      # model a per-workflow choice (see app.ai below), so a single global model
+      # would be the wrong shape — and gpt-4o, which was set here, is no longer
+      # on the price list.
+      api-key: ${OPENAI_API_KEY:}
+    anthropic:
+      api-key: ${ANTHROPIC_API_KEY:}
 
 # =============================================================================
 # Management / Actuator
@@ -209,8 +212,34 @@ app:
       enabled: false
   frontend:
     base-url: http://localhost:3000   # override in staging/prod
+  # ── AI: vendor and model per workflow (PRD v2.1 §9.1) ─────────────────────
+  # Each workflow gets its own ChatClient bean, injected by qualifier. Changing
+  # vendor is a config flip and a redeploy — which is also the failover plan.
+  # Confirm exact model strings against the provider price list at deploy time:
+  # the price tiers are stable, the labels are not.
   ai:
-    evaluation-max-attempts: 3        # max LLM retries for the evaluation pipeline
+    question:
+      vendor: openai
+      model: gpt-5.4-nano        # templated, structured, low-judgement — cheapest tier
+      temperature: 0.4           # some variety across candidates for the same JD
+    followup:
+      vendor: openai
+      model: gpt-5.4-nano        # trivial real-time classification, latency-sensitive
+      temperature: 0.2
+    evaluation:
+      # "Undecided by design" (§13.1) — Haiku is the blind-choice default because
+      # calibration matters more than the ~Rs.0.25 difference. Decide on measured
+      # score-to-hire correlation from the shadow run, not on price.
+      vendor: anthropic
+      model: claude-haiku-4-5
+      temperature: 0.1           # the same transcript must score the same twice
+    # Shadow mode: score with both, serve one, log both, for the first ~50
+    # interviews (~Rs.900 for the whole experiment).
+    shadow-evaluation: false
+    shadow-vendor: openai
+    shadow-model: gpt-5.4-mini
+    prompt-caching: true         # ~90% off question-generation input on a 200-candidate opening
+    evaluation-max-attempts: 3   # then the session is flagged ERROR for manual review
   razorpay:
     key-id: ""
     key-secret: ""
