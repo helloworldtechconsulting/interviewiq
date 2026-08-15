@@ -105,6 +105,12 @@ public class Wallet {
     public long getPromoBalancePaise() { return promoBalancePaise; }
     public void setPromoBalancePaise(long promoBalancePaise) { this.promoBalancePaise = promoBalancePaise; }
 
+    /** Sets both balances at once. Convenience for setup and tests. */
+    public void setPaidAndPromo(long paidPaise, long promoPaise) {
+        this.balancePaise = paidPaise;
+        this.promoBalancePaise = promoPaise;
+    }
+
     /** Paid plus promotional. What a reservation is checked against. */
     public long getTotalBalancePaise() { return balancePaise + promoBalancePaise; }
 

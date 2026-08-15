@@ -9,6 +9,10 @@ import com.interviewiq.billing.dto.WalletResponse;
 import com.interviewiq.billing.infrastructure.WalletRepository;
 import com.interviewiq.billing.infrastructure.WalletTransactionRepository;
 import com.interviewiq.shared.config.RazorpayProperties;
+import com.interviewiq.audit.annotation.Auditable;
+import com.interviewiq.shared.config.BillingProperties;
+import com.interviewiq.shared.exception.ConflictException;
+import com.interviewiq.shared.exception.ValidationException;
 import com.interviewiq.shared.exception.ExternalServiceException;
 import com.interviewiq.shared.exception.InsufficientBalanceException;
 import com.interviewiq.shared.exception.ResourceNotFoundException;
@@ -24,6 +28,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.UUID;
 
 /**
@@ -58,15 +64,18 @@ public class WalletService {
     private final WalletTransactionRepository txRepository;
     private final RazorpayClient              razorpayClient;
     private final RazorpayProperties          razorpayProps;
+    private final BillingProperties           billingProperties;
 
     public WalletService(WalletRepository walletRepository,
                          WalletTransactionRepository txRepository,
                          RazorpayClient razorpayClient,
-                         RazorpayProperties razorpayProps) {
-        this.walletRepository = walletRepository;
-        this.txRepository     = txRepository;
-        this.razorpayClient   = razorpayClient;
-        this.razorpayProps    = razorpayProps;
+                         RazorpayProperties razorpayProps,
+                         BillingProperties billingProperties) {
+        this.walletRepository  = walletRepository;
+        this.txRepository      = txRepository;
+        this.razorpayClient    = razorpayClient;
+        this.razorpayProps     = razorpayProps;
+        this.billingProperties = billingProperties;
     }
 
     // =========================================================================
@@ -79,7 +88,18 @@ public class WalletService {
     @Transactional(readOnly = true)
     public WalletResponse getBalance() {
         UUID companyId = SecurityContext.requireCompanyId();
-        return WalletResponse.from(requireWalletByCompanyId(companyId));
+        Wallet wallet = requireWalletByCompanyId(companyId);
+
+        // The dashboard shows "Balance ₹700 (₹200 promotional, expires 30 Sep)",
+        // so the earliest outstanding grant expiry travels with the balance
+        // (§7.7). A customer must never be surprised about which money is being
+        // spent, or about when free credit disappears.
+        OffsetDateTime promoExpiresAt = wallet.getPromoBalancePaise() > 0
+                ? txRepository.earliestOutstandingGrantExpiry(companyId)
+                : null;
+
+        return WalletResponse.from(wallet, promoExpiresAt,
+                billingProperties.getLowBalanceThresholdPaise());
     }
 
     /**
@@ -152,13 +172,16 @@ public class WalletService {
             return;
         }
 
-        Wallet wallet = requireWalletByCompanyId(companyId);
+        Wallet wallet = lockWallet(companyId);
         wallet.setBalancePaise(wallet.getBalancePaise() + amountPaise);
         walletRepository.save(wallet);
 
         WalletTransaction tx = buildTransaction(wallet, null, TransactionType.TOPUP,
-                amountPaise, wallet.getBalancePaise());
+                amountPaise, wallet.getTotalBalancePaise());
         tx.setRazorpayOrderId(razorpayOrderId);
+        // Paid top-ups bear GST and are the only transactions that appear on an
+        // invoice (§7.8.3). Promotional credit never reaches this path.
+        tx.setGstPaise(billingProperties.gstOn(amountPaise));
         txRepository.save(tx);
 
         log.info("Wallet topped up: companyId={} orderId={} amountPaise={} newBalance={}",
@@ -170,16 +193,27 @@ public class WalletService {
     // =========================================================================
 
     /**
-     * Ring-fences {@code amountPaise} from the available balance when a session is
-     * <em>created</em> (INVITED state) — not when it later starts. The reservation is
-     * therefore outstanding for the whole invite window and must be released if the
-     * session is cancelled, fails, or expires unaccepted.
-     * Throws {@link InsufficientBalanceException} if available funds are insufficient.
+     * Ring-fences {@code amountPaise} when a session is <em>created</em> (INVITED
+     * state) — not when it later starts. The reservation is therefore outstanding
+     * for the whole invite window and must be released if the session is
+     * cancelled, fails, or expires unaccepted.
+     *
+     * <p>Checked against the <strong>combined</strong> paid and promotional
+     * balance. Which pot actually pays is decided at settlement by the
+     * promotional-first ordering (§7.8.3) — a reservation is a claim on the total,
+     * not on a particular pot, because between reserving and settling a company
+     * may top up or a grant may expire.
+     *
+     * <p>The wallet is loaded under a row lock: reading the balance and then
+     * writing an increased reservation is a read-modify-write, and unlocked, two
+     * concurrent session creations can both see enough funds and both reserve.
+     *
+     * @throws InsufficientBalanceException if the combined available balance will not cover it
      */
     @Transactional
     public WalletTransaction reserveFunds(UUID companyId, UUID sessionId, long amountPaise) {
-        Wallet wallet = requireWalletByCompanyId(companyId);
-        long available = wallet.getBalancePaise() - wallet.getReservedPaise();
+        Wallet wallet = lockWallet(companyId);
+        long available = wallet.getAvailablePaise();
 
         if (available < amountPaise) {
             throw new InsufficientBalanceException(amountPaise, available);
@@ -189,7 +223,7 @@ public class WalletService {
         walletRepository.save(wallet);
 
         WalletTransaction tx = buildTransaction(wallet, sessionId, TransactionType.RESERVATION,
-                amountPaise, wallet.getBalancePaise());
+                amountPaise, wallet.getTotalBalancePaise());
         tx.setStatus(TransactionStatus.PENDING);
         return txRepository.save(tx);
     }
@@ -205,7 +239,7 @@ public class WalletService {
      */
     @Transactional
     public void settleFunds(UUID companyId, UUID sessionId, long settledPaise) {
-        Wallet wallet = requireWalletByCompanyId(companyId);
+        Wallet wallet = lockWallet(companyId);
 
         // Find the pending reservation for this session
         WalletTransaction reservation = txRepository
@@ -213,11 +247,20 @@ public class WalletService {
                         wallet.getId(), sessionId, TransactionType.RESERVATION, TransactionStatus.PENDING)
                 .orElse(null);
 
+        if (reservation == null && txRepository.existsByWalletIdAndSessionIdAndTransactionType(
+                wallet.getId(), sessionId, TransactionType.SETTLEMENT)) {
+            // Already settled. §7.8.1 requires settlement to be idempotent per
+            // session: with several pods running, a retried completion must not
+            // charge the company twice.
+            log.info("Session already settled, skipping: companyId={} sessionId={}", companyId, sessionId);
+            return;
+        }
+
         long reservedAmount = reservation != null ? reservation.getAmountPaise() : settledPaise;
 
-        // Release the full reservation, charge the settled amount
+        // Release the full reservation, then charge — promotional credit first.
         wallet.setReservedPaise(Math.max(0, wallet.getReservedPaise() - reservedAmount));
-        wallet.setBalancePaise(Math.max(0, wallet.getBalancePaise() - settledPaise));
+        Spend spend = spendPromotionalFirst(wallet, settledPaise);
         walletRepository.save(wallet);
 
         if (reservation != null) {
@@ -225,19 +268,44 @@ public class WalletService {
             txRepository.save(reservation);
         }
 
-        // Record the settlement
-        txRepository.save(buildTransaction(wallet, sessionId, TransactionType.SETTLEMENT,
-                settledPaise, wallet.getBalancePaise()));
+        WalletTransaction settlement = buildTransaction(wallet, sessionId, TransactionType.SETTLEMENT,
+                settledPaise, wallet.getTotalBalancePaise());
+        txRepository.save(settlement);
 
-        log.info("Funds settled: companyId={} sessionId={} settledPaise={}", companyId, sessionId, settledPaise);
+        log.info("Funds settled: companyId={} sessionId={} settledPaise={} fromPromo={} fromPaid={}",
+                companyId, sessionId, settledPaise, spend.fromPromo(), spend.fromPaid());
     }
+
+    /**
+     * Deducts an amount, spending promotional credit before paid balance.
+     *
+     * <p><strong>Never the reverse.</strong> PRD v2.1 §7.8.3 is unusually direct:
+     * "A customer must never see paid money consumed while free credit sits
+     * unused — that is a refund request and a trust problem."
+     *
+     * <p>Mutates the wallet in place; the caller persists it.
+     *
+     * @return how the charge was split, for the log and the transaction record
+     */
+    private Spend spendPromotionalFirst(Wallet wallet, long amountPaise) {
+        long fromPromo = Math.min(wallet.getPromoBalancePaise(), amountPaise);
+        long fromPaid  = amountPaise - fromPromo;
+
+        wallet.setPromoBalancePaise(wallet.getPromoBalancePaise() - fromPromo);
+        wallet.setBalancePaise(Math.max(0, wallet.getBalancePaise() - fromPaid));
+
+        return new Spend(fromPromo, fromPaid);
+    }
+
+    /** How a charge divided between promotional and paid balance. */
+    private record Spend(long fromPromo, long fromPaid) {}
 
     /**
      * Returns the full reservation when a session is cancelled before starting.
      */
     @Transactional
     public void releaseFunds(UUID companyId, UUID sessionId) {
-        Wallet wallet = requireWalletByCompanyId(companyId);
+        Wallet wallet = lockWallet(companyId);
 
         WalletTransaction reservation = txRepository
                 .findByWalletIdAndSessionIdAndTransactionTypeAndStatus(
@@ -257,9 +325,145 @@ public class WalletService {
         txRepository.save(reservation);
 
         txRepository.save(buildTransaction(wallet, sessionId, TransactionType.RELEASE,
-                releasedAmount, wallet.getBalancePaise()));
+                releasedAmount, wallet.getTotalBalancePaise()));
 
         log.info("Funds released: companyId={} sessionId={} releasedPaise={}", companyId, sessionId, releasedAmount);
+    }
+
+
+    // =========================================================================
+    // Promotional credits (PRD v2.1 §7.8.3)
+    // =========================================================================
+
+    /**
+     * Grants promotional credit to a company.
+     *
+     * <p><strong>Staff-only.</strong> §7.1.3 requires that "the grant endpoint is
+     * restricted to the internal console role, requires a reason, and writes an
+     * AuditLog row. No employer-facing path can create a PROMO_CREDIT
+     * transaction." The role check lives on the controller; the mandatory reason
+     * is enforced here and again by a database CHECK, because an unexplained
+     * free-credit entry makes promotional exposure unauditable.
+     *
+     * <p>Promotional credit lands in a balance of its own — it is not a sale, so
+     * it never bears GST and never appears on an invoice. Keeping it separate is
+     * what stops the accounting and the tax filing disagreeing with each other.
+     *
+     * @param companyId      recipient
+     * @param amountPaise    how much free credit to grant
+     * @param reason         mandatory justification, recorded on the transaction
+     * @param expiresAt      optional expiry; swept by {@code PromoCreditExpiryJob}
+     * @param grantedByStaffId the staff user making the grant
+     */
+    @Auditable(action = "PROMO_CREDIT_GRANTED", entityType = "COMPANY", entityIdArg = 0)
+    @Transactional
+    public WalletTransaction grantPromotionalCredit(UUID companyId,
+                                                    long amountPaise,
+                                                    String reason,
+                                                    OffsetDateTime expiresAt,
+                                                    UUID grantedByStaffId) {
+        if (reason == null || reason.isBlank()) {
+            throw new ValidationException("A reason is required for every promotional grant.");
+        }
+        if (amountPaise <= 0) {
+            throw new ValidationException("Promotional grant amount must be positive.");
+        }
+
+        long cap = billingProperties.getSignupGrant().getTotalExposureCapPaise();
+        if (cap > 0) {
+            long exposure = walletRepository.totalPromotionalExposurePaise();
+            if (exposure + amountPaise > cap) {
+                // "Grants are capped and monitored" (§7.8.3). Refusing here is
+                // preferable to discovering the exposure in a month-end report.
+                throw new ConflictException(
+                        "This grant would exceed the platform promotional exposure cap.");
+            }
+        }
+
+        Wallet wallet = lockWallet(companyId);
+        wallet.setPromoBalancePaise(wallet.getPromoBalancePaise() + amountPaise);
+        walletRepository.save(wallet);
+
+        WalletTransaction tx = buildTransaction(wallet, null, TransactionType.PROMO_CREDIT,
+                amountPaise, wallet.getTotalBalancePaise());
+        tx.setPromotional(true);
+        tx.setGrantReason(reason.strip());
+        tx.setExpiresAt(expiresAt);
+        tx.setGrantedByStaffId(grantedByStaffId);
+        // No GST: promotional credit is not a sale (§7.8.3, §8 Tax).
+        tx.setGstPaise(0L);
+        txRepository.save(tx);
+
+        log.info("Promotional credit granted: companyId={} amountPaise={} expiresAt={} byStaff={} reason={}",
+                companyId, amountPaise, expiresAt, grantedByStaffId, reason);
+        return tx;
+    }
+
+    /**
+     * Reverses promotional credit that expired unspent.
+     *
+     * <p>Written as a reversing transaction rather than a silent balance
+     * adjustment, so the balance and the ledger stay consistent and the
+     * disappearance of credit is explainable to the customer (§7.8.3).
+     *
+     * <p>Reverses only what is still there: if the company already spent most of
+     * the grant, only the unspent remainder can lapse.
+     */
+    @Transactional
+    public void expirePromotionalCredit(UUID companyId, long grantedPaise, UUID grantTransactionId) {
+        Wallet wallet = lockWallet(companyId);
+
+        long reversible = Math.min(wallet.getPromoBalancePaise(), grantedPaise);
+        if (reversible <= 0) {
+            log.debug("Expired promotional grant was already spent: companyId={} grantId={}",
+                    companyId, grantTransactionId);
+            return;
+        }
+
+        wallet.setPromoBalancePaise(wallet.getPromoBalancePaise() - reversible);
+        walletRepository.save(wallet);
+
+        WalletTransaction tx = buildTransaction(wallet, null, TransactionType.PROMO_EXPIRY,
+                reversible, wallet.getTotalBalancePaise());
+        tx.setPromotional(true);
+        tx.setGstPaise(0L);
+        tx.setDescription("Promotional credit expired");
+        txRepository.save(tx);
+
+        log.info("Promotional credit expired: companyId={} reversedPaise={} grantId={}",
+                companyId, reversible, grantTransactionId);
+    }
+
+    /**
+     * Applies the self-serve signup grant, once per company.
+     *
+     * <p>Called on email verification (§7.1.1). Returns quietly rather than
+     * throwing when the grant does not apply — a company that already has one, or
+     * a disabled grant, is a normal outcome of verification, not an error that
+     * should fail the user's signup.
+     *
+     * <p>The one-per-company check is the last of the abuse guards, not the only
+     * one: §7.8.3 also requires email-domain deduplication with stricter
+     * treatment of public free-mail domains, and payment-instrument
+     * deduplication. Those sit in front of this call, in
+     * {@code PromotionalGrantService}.
+     *
+     * @return true if a grant was applied
+     */
+    @Transactional
+    public boolean applySignupGrant(UUID companyId, UUID grantedByStaffId) {
+        BillingProperties.SignupGrant config = billingProperties.getSignupGrant();
+        if (!config.isEnabled() || config.getAmountPaise() <= 0) {
+            return false;
+        }
+
+        OffsetDateTime expiresAt = config.getValidFor() == null
+                ? null
+                : OffsetDateTime.now(ZoneOffset.UTC).plus(config.getValidFor());
+
+        grantPromotionalCredit(companyId, config.getAmountPaise(),
+                "Self-serve signup grant", expiresAt, grantedByStaffId);
+        return true;
     }
 
     // =========================================================================
@@ -268,6 +472,16 @@ public class WalletService {
 
     public Wallet requireWalletByCompanyId(UUID companyId) {
         return walletRepository.findByCompanyId(companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Wallet not found for company: " + companyId));
+    }
+
+    /**
+     * Loads the wallet under a row lock. Every path that moves money uses this
+     * rather than {@link #requireWalletByCompanyId} — see
+     * {@code WalletRepository.findByCompanyIdForUpdate} for why.
+     */
+    private Wallet lockWallet(UUID companyId) {
+        return walletRepository.findByCompanyIdForUpdate(companyId)
                 .orElseThrow(() -> new ResourceNotFoundException("Wallet not found for company: " + companyId));
     }
 
