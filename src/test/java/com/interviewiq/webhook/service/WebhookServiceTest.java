@@ -84,20 +84,49 @@ class WebhookServiceTest {
                 .hasMessageContaining("signature");
     }
 
+    /**
+     * A blank signing secret must reject the request, not wave it through.
+     *
+     * <p>The webhook endpoint is {@code permitAll}. If an unconfigured secret meant
+     * "skip verification", anyone could POST a forged {@code payment.captured} and
+     * mint unlimited wallet credit — which is why PRD v2.1 §7.1.3 requires
+     * verification to fail closed and names it a launch blocker.
+     */
     @Test
-    void handleRazorpay_skipsSignatureVerification_whenSecretIsBlank() {
+    void handleRazorpay_rejects_whenSecretIsNotConfigured() {
         byte[] body = minimalRazorpayPayload("payment.captured", "pay_002", "order_002");
-        when(razorpayProps.getKeySecret()).thenReturn(""); // stub / local mode
-        when(webhookEventRepository.existsByProviderAndIdempotencyKey(any(), any())).thenReturn(false);
-        when(webhookEventRepository.save(any())).thenAnswer(inv -> {
-            WebhookEvent e = inv.getArgument(0);
-            e.setId(java.util.UUID.randomUUID());
-            return e;
-        });
+        when(razorpayProps.getKeySecret()).thenReturn("");
 
-        // Blank secret → skip verification; execution continues normally
-        assertThatCode(() -> webhookService.handleRazorpay(body, "ignored-sig"))
-                .doesNotThrowAnyException();
+        assertThatThrownBy(() -> webhookService.handleRazorpay(body, "any-signature"))
+                .isInstanceOf(ValidationException.class);
+
+        // Nothing may be persisted and no credit may be granted on an unverified event.
+        verify(webhookEventRepository, never()).save(any());
+        verifyNoInteractions(walletService);
+    }
+
+    @Test
+    void handleRazorpay_rejects_whenSignatureHeaderIsAbsent() {
+        byte[] body = minimalRazorpayPayload("payment.captured", "pay_003", "order_003");
+        when(razorpayProps.getKeySecret()).thenReturn(RAZORPAY_SECRET);
+
+        assertThatThrownBy(() -> webhookService.handleRazorpay(body, null))
+                .isInstanceOf(ValidationException.class);
+
+        verify(webhookEventRepository, never()).save(any());
+        verifyNoInteractions(walletService);
+    }
+
+    @Test
+    void handleRazorpay_rejects_whenSignatureIsNotHex() {
+        byte[] body = minimalRazorpayPayload("payment.captured", "pay_004", "order_004");
+        when(razorpayProps.getKeySecret()).thenReturn(RAZORPAY_SECRET);
+
+        assertThatThrownBy(() -> webhookService.handleRazorpay(body, "not-a-hex-digest!!"))
+                .isInstanceOf(ValidationException.class);
+
+        verify(webhookEventRepository, never()).save(any());
+        verifyNoInteractions(walletService);
     }
 
     // =========================================================================

@@ -1,6 +1,8 @@
 package com.interviewiq.storage.service;
 
 import com.interviewiq.shared.config.AwsProperties;
+import com.interviewiq.shared.exception.ValidationException;
+import com.interviewiq.storage.domain.UploadKind;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -9,6 +11,9 @@ import software.amazon.awssdk.core.ResponseBytes;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
+import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
+import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
+import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
@@ -115,6 +120,61 @@ public class StorageService {
                         .key(objectKey)
                         .build());
         return response.asByteArray();
+    }
+
+    /**
+     * Verifies that an uploaded object actually conforms to its {@link UploadKind}'s
+     * size ceiling and MIME allow-list, and deletes it if it does not.
+     *
+     * <p>A pre-signed PUT cannot enforce a maximum size — the signature covers the
+     * key and content type, not the body length, so a client that has been handed a
+     * URL can upload a 5 GB file to it. The check therefore has to happen after the
+     * fact, at confirm time, against what is really in the bucket rather than what
+     * the client claimed. Anything out of bounds is deleted immediately, so a
+     * rejected upload cannot linger and bill us for storage.
+     *
+     * <p>Skipped in stub mode, where no object exists to inspect.
+     *
+     * @param objectKey the key the client has just uploaded to
+     * @param kind      the upload class whose limits apply
+     * @throws ValidationException if the object is missing, too large, or of a
+     *                             content type outside the allow-list
+     */
+    public void verifyUploadedObject(String objectKey, UploadKind kind) {
+        if (props.isUseLocalStub()) {
+            log.info("[S3 STUB] verifyUploadedObject key={} kind={}", objectKey, kind);
+            return;
+        }
+
+        HeadObjectResponse head;
+        try {
+            head = s3Client.headObject(HeadObjectRequest.builder()
+                    .bucket(props.getS3Bucket())
+                    .key(objectKey)
+                    .build());
+        } catch (NoSuchKeyException e) {
+            throw new ValidationException("No uploaded file was found. Please upload the file before confirming.");
+        }
+
+        long size = head.contentLength() == null ? 0L : head.contentLength();
+        if (size <= 0) {
+            deleteObject(objectKey);
+            throw new ValidationException("The uploaded file is empty.");
+        }
+        if (size > kind.getMaxBytes()) {
+            log.warn("Rejected oversized upload: key={} kind={} size={} max={}",
+                    objectKey, kind, size, kind.getMaxBytes());
+            deleteObject(objectKey);
+            throw new ValidationException("File exceeds the maximum size of " + kind.maxSizeLabel() + ".");
+        }
+        if (!kind.permits(head.contentType())) {
+            log.warn("Rejected upload with disallowed content type: key={} kind={} contentType={}",
+                    objectKey, kind, head.contentType());
+            deleteObject(objectKey);
+            throw new ValidationException(
+                    "Unsupported file type '" + UploadKind.normaliseContentType(head.contentType())
+                            + "'. Allowed: " + String.join(", ", kind.getAllowedContentTypes()) + ".");
+        }
     }
 
     /**

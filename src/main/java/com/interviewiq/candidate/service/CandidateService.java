@@ -11,7 +11,9 @@ import com.interviewiq.shared.exception.ConflictException;
 import com.interviewiq.shared.exception.ResourceNotFoundException;
 import com.interviewiq.shared.exception.ValidationException;
 import com.interviewiq.shared.security.SecurityContext;
+import com.interviewiq.storage.domain.UploadKind;
 import com.interviewiq.storage.service.StorageService;
+import com.interviewiq.storage.service.UploadKeyService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -48,13 +50,16 @@ public class CandidateService {
     private final CandidateRepository    candidateRepository;
     private final JobOpeningRepository   jobOpeningRepository;
     private final StorageService         storageService;
+    private final UploadKeyService       uploadKeyService;
 
     public CandidateService(CandidateRepository candidateRepository,
                             JobOpeningRepository jobOpeningRepository,
-                            StorageService storageService) {
+                            StorageService storageService,
+                            UploadKeyService uploadKeyService) {
         this.candidateRepository  = candidateRepository;
         this.jobOpeningRepository = jobOpeningRepository;
         this.storageService       = storageService;
+        this.uploadKeyService     = uploadKeyService;
     }
 
     // =========================================================================
@@ -122,29 +127,39 @@ public class CandidateService {
 
     /**
      * Generates a presigned S3 PUT URL for uploading the candidate's resume.
+     *
+     * <p>The key is derived server-side from the authenticated company and this
+     * candidate; the content type is checked against the résumé allow-list (PDF or
+     * DOCX) before a URL is issued.
      */
     public ResumeUploadUrlResponse generateResumeUploadUrl(UUID candidateId, String contentType) {
         Candidate candidate = requireCandidate(candidateId);
-        String objectKey = "resumes/" + candidate.getCompanyId() + "/" + candidateId + "/" +
-                           UUID.randomUUID() + resolveExtension(contentType);
+        String objectKey = uploadKeyService.deriveKey(
+                UploadKind.RESUME, candidate.getCompanyId(), candidateId, contentType);
         String uploadUrl = storageService.generatePresignedUploadUrl(objectKey, contentType, RESUME_UPLOAD_EXPIRY);
         return new ResumeUploadUrlResponse(uploadUrl, objectKey);
     }
 
     /**
      * Records the S3 key after the client confirms the resume upload is complete.
+     *
+     * <p>The supplied key is validated against this company and candidate, and the
+     * object itself is inspected for size and MIME conformance, before anything is
+     * persisted. A pre-signed PUT cannot bound the body size, so the real file has
+     * to be checked here rather than trusted (PRD v2.1 §7.1.3).
      */
     @Transactional
     public CandidateResponse confirmResumeUploaded(UUID candidateId, String objectKey) {
         Candidate candidate = requireCandidate(candidateId);
-        if (objectKey == null || objectKey.isBlank()) {
-            throw new ValidationException("Object key must not be blank.");
-        }
-        candidate.setResumeS3Key(objectKey);
+        String ownedKey = uploadKeyService.validateOwnedKey(
+                UploadKind.RESUME, candidate.getCompanyId(), candidateId, objectKey);
+        storageService.verifyUploadedObject(ownedKey, UploadKind.RESUME);
+
+        candidate.setResumeS3Key(ownedKey);
         candidate.setResumeExtractionStatus(PipelineStatus.PENDING);
         candidate.setResumeText(null);
         candidateRepository.save(candidate);
-        log.info("Resume upload confirmed: candidateId={} key={}", candidateId, objectKey);
+        log.info("Resume upload confirmed: candidateId={} key={}", candidateId, ownedKey);
         return CandidateResponse.from(candidate);
     }
 
@@ -162,12 +177,4 @@ public class CandidateService {
     // Private helpers
     // =========================================================================
 
-    private String resolveExtension(String contentType) {
-        if (contentType == null) return "";
-        return switch (contentType) {
-            case "application/pdf" -> ".pdf";
-            case "application/vnd.openxmlformats-officedocument.wordprocessingml.document" -> ".docx";
-            default -> "";
-        };
-    }
 }
