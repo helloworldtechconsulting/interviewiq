@@ -1,39 +1,48 @@
 # =============================================================================
-# STAGING — Oracle Cloud (deliberately NOT the production cloud)
+# STAGING — GCP
 #
-# Arch v4.0 §6 and PRD §8 give the same instruction, and it is the reason this
-# file exists at all:
+# Both environments now run on GKE. Staging is the same Kubernetes workload as
+# production, on the same cloud, sized down.
+#
+# ── A documented decision this reverses ──────────────────────────────────────
+#
+# Architecture v4.0 §6 and decision #14 both say to run staging on a DIFFERENT
+# cloud from production:
 #
 #   "Run staging on a different cloud from production. Portability that has
-#    never been exercised is a hope, not a property — and staging is small
-#    enough to be nearly free."
+#    never been exercised is a hope, not a property."
 #
-# So staging runs on Oracle Always Free while production runs on GKE. The
-# platform module differs; the workload and edge modules below are IDENTICAL to
-# production's, character for character. If a change breaks portability, it
-# breaks staging first — which is exactly when we want to find out.
+# That reasoning still holds, and moving staging to GCP gives it up: nothing
+# routinely applies the workload module against a non-GCP platform any more, so
+# a GCP-specific assumption can now reach production without staging catching
+# it. The OCI platform module is kept, complete and current, so the property
+# can be re-established — see `platform_target` below — but a module that is
+# never applied does decay, and this one now will unless it is exercised
+# deliberately.
 #
-# Cost: essentially zero. 4 Ampere Arm cores and 24 GB RAM on the Always Free
-# tier, with a free OKE control plane, no expiry and no application process.
+# The mitigation is that the seam is still real and still enforced: everything
+# below the platform module consumes only `local.platform.*`, the output
+# contract every platform module implements. Switching staging back to Oracle
+# is changing `platform_target` and re-applying, which is what Arch §4 promises
+# and what the previous hardcoded `source = ".../oci"` did not actually deliver.
+#
+# ── How the switch works ─────────────────────────────────────────────────────
+#
+# A module's `source` cannot be a variable, so both platform modules are
+# declared and `count` selects one. The unselected module produces no
+# resources, and `local.platform` resolves whichever is live.
 # =============================================================================
 
 terraform {
   required_version = ">= 1.6"
 
-  backend "s3" {
-    # OCI Object Storage speaks the S3 API, so the standard S3 backend works
-    # against it with an endpoint override — the same portability property the
-    # application relies on for its own storage.
-    bucket                      = "interviewiq-tfstate-staging"
-    key                         = "staging/terraform.tfstate"
-    region                      = "ap-mumbai-1"
-    skip_credentials_validation = true
-    skip_region_validation      = true
-    skip_requesting_account_id  = true
-    use_path_style              = true
+  backend "gcs" {
+    bucket = "interviewiq-tfstate-staging"
+    prefix = "staging"
   }
 
   required_providers {
+    google     = { source = "hashicorp/google", version = "~> 5.30" }
     oci        = { source = "oracle/oci", version = "~> 5.40" }
     kubernetes = { source = "hashicorp/kubernetes", version = "~> 2.30" }
     helm       = { source = "hashicorp/helm", version = "~> 2.13" }
@@ -41,12 +50,40 @@ terraform {
   }
 }
 
-provider "oci" {
-  region = var.region
+provider "google" {
+  project = var.project_id
+  region  = var.region
 }
 
-# ── The one cloud-specific layer — the ONLY file that differs from production ─
-module "platform" {
+# ── The one cloud-specific layer ─────────────────────────────────────────────
+
+module "platform_gcp" {
+  count  = var.platform_target == "gcp" ? 1 : 0
+  source = "../../modules/platform/gcp"
+
+  environment = "staging"
+  project_id  = var.project_id
+  region      = var.region
+  zone        = var.zone
+
+  # Two small ARM nodes. Staging carries no real load; the node count exists so
+  # that pod scheduling and topology spread behave as they do in production
+  # rather than collapsing onto one node.
+  node_count = 2
+  # standard-2 rather than standard-1: the monitoring stack below wants
+  # roughly 1.5 GB of requests, and running it in staging is the only way
+  # the alert rules get exercised before production depends on them.
+  machine_type = "t2a-standard-2"
+  db_tier      = "db-f1-micro"
+
+  object_storage_endpoint   = var.r2_endpoint
+  object_storage_bucket     = var.r2_bucket
+  object_storage_access_key = var.r2_access_key
+  object_storage_secret_key = var.r2_secret_key
+}
+
+module "platform_oci" {
+  count  = var.platform_target == "oci" ? 1 : 0
   source = "../../modules/platform/oci"
 
   environment         = "staging"
@@ -64,33 +101,77 @@ module "platform" {
   object_storage_secret_key = var.r2_secret_key
 }
 
-data "oci_containerengine_cluster_kube_config" "kubeconfig" {
-  cluster_id = module.platform.cluster_id
-}
-
+# ── The seam ─────────────────────────────────────────────────────────────────
+# Everything past this point reads local.platform and nothing else. one()
+# returns null for the module that was not selected, so coalesce picks the live
+# one without either branch being evaluated when absent.
 locals {
-  kubeconfig = yamldecode(data.oci_containerengine_cluster_kube_config.kubeconfig.content)
+  platform = {
+    kubeconfig = coalesce(
+      one(module.platform_gcp[*].kubeconfig),
+      one(module.platform_oci[*].kubeconfig),
+    )
+    postgres_url = coalesce(
+      one(module.platform_gcp[*].postgres_url),
+      one(module.platform_oci[*].postgres_url),
+    )
+    postgres_username = coalesce(
+      one(module.platform_gcp[*].postgres_username),
+      one(module.platform_oci[*].postgres_username),
+    )
+    postgres_password = coalesce(
+      one(module.platform_gcp[*].postgres_password),
+      one(module.platform_oci[*].postgres_password),
+    )
+    object_storage_endpoint = coalesce(
+      one(module.platform_gcp[*].object_storage_endpoint),
+      one(module.platform_oci[*].object_storage_endpoint),
+    )
+    object_storage_bucket = coalesce(
+      one(module.platform_gcp[*].object_storage_bucket),
+      one(module.platform_oci[*].object_storage_bucket),
+    )
+    object_storage_region = coalesce(
+      one(module.platform_gcp[*].object_storage_region),
+      one(module.platform_oci[*].object_storage_region),
+    )
+    object_storage_access_key = coalesce(
+      one(module.platform_gcp[*].object_storage_access_key),
+      one(module.platform_oci[*].object_storage_access_key),
+    )
+    object_storage_secret_key = coalesce(
+      one(module.platform_gcp[*].object_storage_secret_key),
+      one(module.platform_oci[*].object_storage_secret_key),
+    )
+    secret_store_name = coalesce(
+      one(module.platform_gcp[*].secret_store_name),
+      one(module.platform_oci[*].secret_store_name),
+    )
+  }
 }
 
+data "google_client_config" "default" {}
+
+# Cluster authentication is the one thing that cannot come through the output
+# contract: GKE takes a bearer token from the google provider, while OKE needs
+# an exec plugin shelling out to the OCI CLI. A provider block cannot be made
+# conditional, so this one is written for the GKE path.
+#
+# Switching platform_target to "oci" therefore also means restoring the exec
+# block that was here before — kept in git history at this path. That is the
+# honest cost of the switch and the reason it is not purely a one-variable
+# change for the provider layer, even though it is for everything below.
 provider "kubernetes" {
-  host                   = local.kubeconfig.clusters[0].cluster.server
-  cluster_ca_certificate = base64decode(local.kubeconfig.clusters[0].cluster["certificate-authority-data"])
-  exec {
-    api_version = "client.authentication.k8s.io/v1beta1"
-    command     = "oci"
-    args        = local.kubeconfig.users[0].user.exec.args
-  }
+  host                   = local.platform.kubeconfig.host
+  cluster_ca_certificate = base64decode(local.platform.kubeconfig.cluster_ca_certificate)
+  token                  = data.google_client_config.default.access_token
 }
 
 provider "helm" {
   kubernetes {
-    host                   = local.kubeconfig.clusters[0].cluster.server
-    cluster_ca_certificate = base64decode(local.kubeconfig.clusters[0].cluster["certificate-authority-data"])
-    exec {
-      api_version = "client.authentication.k8s.io/v1beta1"
-      command     = "oci"
-      args        = local.kubeconfig.users[0].user.exec.args
-    }
+    host                   = local.platform.kubeconfig.host
+    cluster_ca_certificate = base64decode(local.platform.kubeconfig.cluster_ca_certificate)
+    token                  = data.google_client_config.default.access_token
   }
 }
 
@@ -107,17 +188,17 @@ module "workload" {
 
   frontend_origins = ["https://app-staging.${var.zone_name}"]
 
-  postgres_url      = module.platform.postgres_url
-  postgres_username = module.platform.postgres_username
-  postgres_password = module.platform.postgres_password
+  postgres_url      = local.platform.postgres_url
+  postgres_username = local.platform.postgres_username
+  postgres_password = local.platform.postgres_password
 
-  object_storage_endpoint   = module.platform.object_storage_endpoint
-  object_storage_bucket     = module.platform.object_storage_bucket
-  object_storage_region     = module.platform.object_storage_region
-  object_storage_access_key = module.platform.object_storage_access_key
-  object_storage_secret_key = module.platform.object_storage_secret_key
+  object_storage_endpoint   = local.platform.object_storage_endpoint
+  object_storage_bucket     = local.platform.object_storage_bucket
+  object_storage_region     = local.platform.object_storage_region
+  object_storage_access_key = local.platform.object_storage_access_key
+  object_storage_secret_key = local.platform.object_storage_secret_key
 
-  secret_store_name = module.platform.secret_store_name
+  secret_store_name = local.platform.secret_store_name
 
   # Staging carries no real load, but the web floor stays at 2 so that pod
   # eviction during a rollout is actually exercised here rather than discovered
@@ -126,8 +207,24 @@ module "workload" {
   web_max_replicas    = 3
   worker_min_replicas = 1
   worker_max_replicas = 2
-  hikari_pool_size    = 10
-  bucket_capacity     = 10
+
+  # db-f1-micro allows far fewer connections than the production tier, so the
+  # pools are sized down to match. Left at production's values, the connection
+  # budget check would fail here — correctly, because staging's database is
+  # smaller.
+  hikari_pool_size         = 5
+  worker_hikari_pool_size  = 3
+  database_max_connections = 50
+
+  bucket_capacity = 10
+
+  # Enabled here too, deliberately. An alert rule that has only ever been
+  # applied in production is an alert rule nobody has seen fire.
+  monitoring_enabled     = true
+  grafana_admin_password = var.grafana_admin_password
+
+  # Staging generates no meaningful history and the disk is small.
+  metrics_retention = "3d"
 }
 
 # ── The edge — identical on every cloud ──────────────────────────────────────

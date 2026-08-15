@@ -14,16 +14,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
-import java.security.InvalidKeyException;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
-import java.util.HexFormat;
-import java.util.Locale;
 import java.util.UUID;
 
 /**
@@ -50,19 +43,22 @@ public class WebhookService {
 
     private static final Logger log = LoggerFactory.getLogger(WebhookService.class);
 
-    private final WebhookEventRepository webhookEventRepository;
-    private final WalletService          walletService;
-    private final RazorpayProperties     razorpayProps;
-    private final ObjectMapper           objectMapper;
+    private final WebhookEventRepository   webhookEventRepository;
+    private final WalletService            walletService;
+    private final RazorpayProperties       razorpayProps;
+    private final ObjectMapper             objectMapper;
+    private final WebhookSignatureVerifier signatureVerifier;
 
     public WebhookService(WebhookEventRepository webhookEventRepository,
                           WalletService walletService,
                           RazorpayProperties razorpayProps,
-                          ObjectMapper objectMapper) {
+                          ObjectMapper objectMapper,
+                          WebhookSignatureVerifier signatureVerifier) {
         this.webhookEventRepository = webhookEventRepository;
         this.walletService          = walletService;
         this.razorpayProps          = razorpayProps;
         this.objectMapper           = objectMapper;
+        this.signatureVerifier      = signatureVerifier;
     }
 
     // =========================================================================
@@ -77,7 +73,7 @@ public class WebhookService {
      */
     @Transactional
     public void handleRazorpay(byte[] rawBody, String signatureHeader) {
-        verifyHmac(rawBody, signatureHeader, razorpayProps.getKeySecret(), "Razorpay");
+        signatureVerifier.verify(rawBody, signatureHeader, razorpayProps.getKeySecret(), "Razorpay");
 
         String payloadJson = new String(rawBody, StandardCharsets.UTF_8);
         JsonNode root = parseJson(payloadJson);
@@ -194,50 +190,4 @@ public class WebhookService {
         }
     }
 
-    /**
-     * Verifies an HMAC-SHA256 signature over the raw request body.
-     *
-     * <p><strong>This method fails closed.</strong> A missing or blank signing
-     * secret, and a missing or blank signature, are both rejected — they are not
-     * treated as "verification not configured". The webhook endpoint is
-     * {@code permitAll}, so skipping verification when the secret happens to be
-     * unset lets anyone forge {@code payment.captured} and mint unlimited wallet
-     * credit. PRD v2.1 §7.1.3 names this as a launch blocker.
-     *
-     * <p>The digest comparison is constant-time so that a caller cannot recover a
-     * valid signature byte by byte from response timing.
-     *
-     * @throws ValidationException if the secret is absent, the signature is
-     *                             absent, or the signature does not match
-     */
-    private void verifyHmac(byte[] body, String signature, String secret, String provider) {
-        if (secret == null || secret.isBlank()) {
-            log.error("{} webhook rejected: signing secret is not configured", provider);
-            throw new ValidationException("Webhook signature verification is not configured.");
-        }
-        if (signature == null || signature.isBlank()) {
-            log.warn("{} webhook rejected: request carried no signature", provider);
-            throw new ValidationException("Invalid webhook signature.");
-        }
-        try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            byte[] expected = mac.doFinal(body);
-
-            byte[] provided;
-            try {
-                provided = HexFormat.of().parseHex(signature.trim().toLowerCase(Locale.ROOT));
-            } catch (IllegalArgumentException e) {
-                log.warn("{} webhook rejected: signature is not valid hex", provider);
-                throw new ValidationException("Invalid webhook signature.");
-            }
-
-            if (!MessageDigest.isEqual(expected, provided)) {
-                log.warn("{} webhook signature mismatch", provider);
-                throw new ValidationException("Invalid webhook signature.");
-            }
-        } catch (NoSuchAlgorithmException | InvalidKeyException e) {
-            throw new RuntimeException("HMAC verification setup failed", e);
-        }
-    }
 }

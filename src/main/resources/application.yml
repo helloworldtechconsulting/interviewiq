@@ -92,6 +92,22 @@ management:
     tags:
       application: ${spring.application.name}
 
+  # ── Distributed tracing (PRD v2.1 §8) ─────────────────────────────────────
+  # Sampling defaults to 0.0: the bridge is on the classpath and populates
+  # traceId/spanId into the MDC — which is what makes the JSON logs
+  # correlatable — but nothing is exported until an environment opts in.
+  #
+  # Off by default because an OTLP exporter with no collector behind it retries
+  # on a schedule and logs a failure every time, which is a self-inflicted
+  # noise source in exactly the environments nobody is watching closely.
+  tracing:
+    enabled: true
+    sampling:
+      probability: ${TRACING_SAMPLE_RATE:0.0}
+  otlp:
+    tracing:
+      endpoint: ${OTLP_ENDPOINT:http://localhost:4318/v1/traces}
+
 # =============================================================================
 # Server
 # =============================================================================
@@ -108,8 +124,9 @@ server:
 # Logging (base — profiles can override log levels)
 # =============================================================================
 logging:
-  pattern:
-    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{traceId:-}] %logger{36} - %msg%n"
+  # The console pattern lives in logback-spring.xml, not here — that file
+  # defines its own appenders, which makes logging.pattern.* inert. Deployed
+  # profiles emit one JSON object per line; local stays human-readable.
   level:
     root:                           INFO
     com.interviewiq:                INFO
@@ -176,6 +193,16 @@ app:
     from-address: noreply@interviewiq.in
     from-name: InterviewIQ
     use-local-stub: false
+
+    # ── Bounce / complaint callbacks (INTIQ-32, §13.3) ──────────────────────
+    # webhook-provider selects the payload parser: resend | postmark | brevo.
+    # Both this and webhook-secret are intentionally blank by default — the
+    # endpoint rejects rather than guessing. A default provider would parse
+    # real bounces with the wrong adapter and classify every one of them as
+    # "ignored": HTTP 200, no suppression, no error, nothing in the logs.
+    webhook-provider: ${MAIL_WEBHOOK_PROVIDER:}
+    webhook-secret: ${MAIL_WEBHOOK_SECRET:}
+    webhook-signature-header: ${MAIL_WEBHOOK_SIGNATURE_HEADER:X-Webhook-Signature}
 
   # ── Worker tuning (PRD v2.1 §7.9) ─────────────────────────────────────────
   # Every polling worker claims with FOR UPDATE SKIP LOCKED and an explicit

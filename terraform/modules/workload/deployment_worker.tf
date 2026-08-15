@@ -65,6 +65,16 @@ resource "kubernetes_deployment_v1" "worker" {
             value = "${var.environment},worker"
           }
 
+          # Sized independently of the web pool. Without this the worker
+          # inherited application.yml's default of 10, which put a fully
+          # scaled-out deployment at 100 of ~112 available connections — too
+          # little headroom to survive a rolling deploy, when old and new pods
+          # hold their pools simultaneously (Arch v4.0 §5.4).
+          env {
+            name  = "SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE"
+            value = tostring(var.worker_hikari_pool_size)
+          }
+
           env_from {
             config_map_ref { name = kubernetes_config_map_v1.app.metadata[0].name }
           }

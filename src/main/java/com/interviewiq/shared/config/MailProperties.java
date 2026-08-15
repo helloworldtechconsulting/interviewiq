@@ -36,6 +36,30 @@ public class MailProperties {
      */
     private String bounceCallbackPath = "/api/v1/webhooks/email";
 
+    /**
+     * Which provider's webhook payload shape to expect — {@code resend},
+     * {@code postmark} or {@code brevo} (Arch v4.0 §3).
+     *
+     * <p>Deliberately has no default. Guessing the provider would mean parsing
+     * a bounce with the wrong adapter, which does not fail loudly: the fields
+     * simply come back empty and every notification is silently classified as
+     * {@code IGNORED}. A blank value rejects the webhook outright instead, which
+     * is noticeable on day one rather than at the first deliverability crisis.
+     */
+    private String webhookProvider = "";
+
+    /**
+     * Shared secret for verifying inbound bounce/complaint callbacks.
+     *
+     * <p>Must be set in any environment where the callback is reachable. The
+     * verifier fails closed on a blank secret — see
+     * {@code WebhookSignatureVerifier}.
+     */
+    private String webhookSecret = "";
+
+    /** Header the provider puts its HMAC signature in. */
+    private String webhookSignatureHeader = "X-Webhook-Signature";
+
     /** When true, sends are logged instead of transmitted. Local development only. */
     private boolean useLocalStub = false;
 
@@ -47,6 +71,15 @@ public class MailProperties {
 
     public String getBounceCallbackPath() { return bounceCallbackPath; }
     public void setBounceCallbackPath(String bounceCallbackPath) { this.bounceCallbackPath = bounceCallbackPath; }
+
+    public String getWebhookProvider() { return webhookProvider; }
+    public void setWebhookProvider(String webhookProvider) { this.webhookProvider = webhookProvider; }
+
+    public String getWebhookSecret() { return webhookSecret; }
+    public void setWebhookSecret(String webhookSecret) { this.webhookSecret = webhookSecret; }
+
+    public String getWebhookSignatureHeader() { return webhookSignatureHeader; }
+    public void setWebhookSignatureHeader(String webhookSignatureHeader) { this.webhookSignatureHeader = webhookSignatureHeader; }
 
     public boolean isUseLocalStub() { return useLocalStub; }
     public void setUseLocalStub(boolean useLocalStub) { this.useLocalStub = useLocalStub; }

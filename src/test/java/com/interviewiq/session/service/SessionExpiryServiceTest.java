@@ -55,6 +55,54 @@ class SessionExpiryServiceTest {
         assertThat(s.getStatus()).isEqualTo(SessionStatus.EXPIRED);
         verify(sessionRepository).save(s);
         verify(walletService).releaseFunds(companyId, sessionId);
+
+        // An INVITED session was never booked into a time slot, so there is no
+        // capacity to give back. Releasing anyway would decrement a bucket this
+        // session never occupied and hand out a slot twice.
+        verifyNoInteractions(capacityService);
+    }
+
+    /**
+     * §7.4.4 — a candidate who booked a slot and never showed up still has an
+     * invite that lapses, and the slot they were holding has to go back.
+     *
+     * <p>SCHEDULED became expirable in v2.1. Without this path a no-show would
+     * permanently consume a capacity bucket: nothing else releases it, so the
+     * platform's bookable capacity would ratchet down with every no-show.
+     */
+    @Test
+    void scheduledSession_alsoReleasesTheCapacityBucketItHeld() {
+        UUID sessionId = UUID.randomUUID();
+        UUID companyId = UUID.randomUUID();
+        InterviewSession s = session(sessionId, companyId, SessionStatus.SCHEDULED);
+        when(sessionRepository.findByIdForUpdate(sessionId)).thenReturn(Optional.of(s));
+
+        boolean acted = service().expireAndRelease(sessionId);
+
+        assertThat(acted).isTrue();
+        assertThat(s.getStatus()).isEqualTo(SessionStatus.EXPIRED);
+        verify(walletService).releaseFunds(companyId, sessionId);
+        verify(capacityService).releaseForSession(sessionId);
+    }
+
+    /**
+     * The lock's whole purpose. Two pods can both select the same stale invite;
+     * the one that loses the race acquires the lock only after the winner has
+     * already written EXPIRED. It must not release the reservation a second
+     * time — that would credit the company for money it never reserved.
+     */
+    @Test
+    void aSessionAlreadyExpiredByAnotherPodIsNotReleasedTwice() {
+        UUID sessionId = UUID.randomUUID();
+        InterviewSession alreadyExpired = session(sessionId, UUID.randomUUID(), SessionStatus.EXPIRED);
+        when(sessionRepository.findByIdForUpdate(sessionId)).thenReturn(Optional.of(alreadyExpired));
+
+        boolean acted = service().expireAndRelease(sessionId);
+
+        assertThat(acted).isFalse();
+        verify(sessionRepository, never()).save(alreadyExpired);
+        verifyNoInteractions(walletService);
+        verifyNoInteractions(capacityService);
     }
 
     @Test

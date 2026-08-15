@@ -79,7 +79,19 @@ const ROLE_META: Record<
     icon: <Eye className="h-3 w-3" />,
     colour: "bg-gray-100 text-gray-700",
   },
+  // Never assignable from this page — PLATFORM_STAFF is an InterviewIQ
+  // employee, not a member of the customer's team. It appears here only
+  // because the map is keyed on the full UserRole union, and a staff account
+  // viewing this list should render as something rather than crash.
+  PLATFORM_STAFF: {
+    label: "InterviewIQ Staff",
+    icon: <ShieldCheck className="h-3 w-3" />,
+    colour: "bg-amber-100 text-amber-800",
+  },
 };
+
+/** The roles a customer admin can actually grant — PLATFORM_STAFF is not one. */
+type AssignableRole = "ADMIN" | "RECRUITER" | "VIEWER";
 
 function RoleBadge({ role }: { role: UserRole }) {
   const { label, icon, colour } = ROLE_META[role] ?? ROLE_META.VIEWER;
@@ -202,7 +214,7 @@ function InviteDialog({ open, onOpenChange }: InviteDialogProps) {
             <Select
               value={role}
               onValueChange={(v) =>
-                setValue("role", v as UserRole, { shouldValidate: true })
+                setValue("role", v as AssignableRole, { shouldValidate: true })
               }
             >
               <SelectTrigger>

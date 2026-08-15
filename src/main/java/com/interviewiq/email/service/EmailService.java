@@ -100,13 +100,16 @@ public class EmailService {
     private final JavaMailSender         mailSender;
     private final MailProperties         mailProperties;
     private final EmailEventRepository   emailEventRepository;
+    private final EmailSuppressionService suppressionService;
 
     public EmailService(JavaMailSender mailSender,
                         MailProperties mailProperties,
-                        EmailEventRepository emailEventRepository) {
+                        EmailEventRepository emailEventRepository,
+                        EmailSuppressionService suppressionService) {
         this.mailSender           = mailSender;
         this.mailProperties       = mailProperties;
         this.emailEventRepository = emailEventRepository;
+        this.suppressionService   = suppressionService;
     }
 
     // =========================================================================
@@ -366,6 +369,23 @@ public class EmailService {
                       Attachment attachment) {
         String recipientLower = to.toLowerCase();
         EmailEvent event = buildEvent(recipientLower, emailType, companyId, userId);
+
+        // Suppression is checked before anything else, including the local stub
+        // — the stub exists to mirror real behaviour, and a stub that "sends" to
+        // a suppressed address would hide the very bug this guard prevents.
+        //
+        // The check is unconditional across email types. It is tempting to
+        // exempt OTPs so a user can always get back in, but an address on this
+        // list hard-bounced or reported us as spam: the OTP would not arrive
+        // either way, and sending it anyway only compounds the reputation
+        // damage that got the address suppressed. Recovery is releasing the
+        // address (EmailSuppressionService.release), not routing around it.
+        if (suppressionService.isSuppressed(recipientLower)) {
+            log.info("Send withheld — address is suppressed: to={} type={}", recipientLower, emailType);
+            event.setStatus(EmailStatus.SUPPRESSED);
+            emailEventRepository.save(event);
+            return;
+        }
 
         if (mailProperties.isUseLocalStub()) {
             log.info("[SMTP STUB] to={} subject={} body_chars={} attachment={}",

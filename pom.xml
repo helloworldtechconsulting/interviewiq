@@ -35,6 +35,7 @@
 
         <!-- JaCoCo — code coverage (0.8.12 supports Java 21) -->
         <jacoco.version>0.8.12</jacoco.version>
+        <gatling.version>3.11.5</gatling.version>
 
         <!-- Newer Testcontainers than Spring Boot 3.3.6 manages (1.19.8), pulling a
              newer docker-java client for modern Docker Engine compatibility. -->
@@ -206,6 +207,31 @@
         <dependency>
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
+        <!-- ── Distributed tracing (PRD v2.1 §8) ─────────────────
+             Micrometer Tracing over OpenTelemetry, exporting OTLP. Bridge and
+             exporter are separate artifacts: the bridge produces spans, the
+             exporter ships them. Disabled by default via a zero sampling
+             probability — see application.yml. -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-tracing-bridge-otel</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-otlp</artifactId>
+        </dependency>
+
+        <!-- ── Structured logging (PRD v2.1 §8) ──────────────────
+             Spring Boot only gained first-class structured logging in 3.4; on
+             3.3 the encoder is an explicit dependency. Active for deployed
+             profiles only — logback-spring.xml keeps local runs human-readable,
+             because JSON in a developer's terminal is a real cost for no gain. -->
+        <dependency>
+            <groupId>net.logstash.logback</groupId>
+            <artifactId>logstash-logback-encoder</artifactId>
+            <version>7.4</version>
         </dependency>
 
         <!-- ── JWT: API + HMAC/RSA implementation ────────────── -->
@@ -399,6 +425,38 @@
                 </configuration>
             </plugin>
 
+            <!-- Failsafe — runs the Testcontainers integration tests (*IT).
+
+                 Added because they were not running anywhere. Surefire skips
+                 *IT by naming convention and no Failsafe execution was bound,
+                 so every *IT class in this repo was compiled and then never
+                 executed: the schema-mapping check that catches an entity
+                 drifting from its migration, the SKIP LOCKED claiming test,
+                 the wallet reservation expiry test. Passing CI meant nothing
+                 about any of them.
+
+                 Bound to verify, so `mvn test` stays fast for local loops and
+                 `mvn verify` is the gate. Needs a Docker daemon; CI runners
+                 have one. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <configuration>
+                    <systemPropertyVariables>
+                        <api.version>${docker.api.version}</api.version>
+                    </systemPropertyVariables>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>integration-tests</id>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
             <!-- JaCoCo — code coverage report from the unit-test (Surefire) run.
                  `prepare-agent` wires the coverage agent into Surefire's argLine;
                  `report` renders target/site/jacoco/index.html after the test phase.
@@ -500,5 +558,89 @@
             </snapshots>
         </pluginRepository>
     </pluginRepositories>
+
+    <!-- =====================================================================
+         Load test (INTIQ-99)
+
+         In a profile, not the default build. The simulation drives a real
+         deployed environment over HTTP and WebSocket; it is not something a
+         `mvn verify` should ever start.
+
+             ./mvnw gatling:test -Pload-test \
+                 -Dgatling.simulationClass=com.interviewiq.load.InterviewRoomSimulation \
+                 -Dload.baseUrl=https://api-staging.interviewiq.in \
+                 -Dload.concurrentInterviews=25
+
+         See src/test/resources/load/README.md for how to seed the tokens it
+         feeds on.
+         ===================================================================== -->
+    <profiles>
+        <profile>
+            <id>load-test</id>
+
+            <dependencies>
+                <dependency>
+                    <groupId>io.gatling.highcharts</groupId>
+                    <artifactId>gatling-charts-highcharts</artifactId>
+                    <version>${gatling.version}</version>
+                    <scope>test</scope>
+                </dependency>
+            </dependencies>
+
+            <build>
+                <plugins>
+                    <!-- Simulations live in src/gatling, not src/test/java.
+
+                         They have to: the Gatling dependency is scoped to this
+                         profile, so a simulation under src/test/java would fail
+                         every ordinary `mvn verify` with "package
+                         io.gatling.javaapi.core does not exist". This source
+                         root only exists when the profile is active. -->
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>build-helper-maven-plugin</artifactId>
+                        <version>3.6.0</version>
+                        <executions>
+                            <execution>
+                                <id>add-gatling-sources</id>
+                                <phase>generate-test-sources</phase>
+                                <goals>
+                                    <goal>add-test-source</goal>
+                                </goals>
+                                <configuration>
+                                    <sources>
+                                        <source>src/gatling/java</source>
+                                    </sources>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>add-gatling-resources</id>
+                                <phase>generate-test-resources</phase>
+                                <goals>
+                                    <goal>add-test-resource</goal>
+                                </goals>
+                                <configuration>
+                                    <resources>
+                                        <resource>
+                                            <directory>src/gatling/resources</directory>
+                                        </resource>
+                                    </resources>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <plugin>
+                        <groupId>io.gatling</groupId>
+                        <artifactId>gatling-maven-plugin</artifactId>
+                        <version>4.9.6</version>
+                        <configuration>
+                            <simulationClass>com.interviewiq.load.InterviewRoomSimulation</simulationClass>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 
 </project>

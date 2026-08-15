@@ -302,24 +302,71 @@ public class InterviewRoomService {
      * informational signals that never auto-fail a candidate.
      */
     @Transactional
-    public void recordProctoringEvent(UUID sessionId, String type, String occurredAtIso) {
+    public boolean recordProctoringEvent(UUID sessionId, String type, String occurredAtIso) {
         ProctoringEventType eventType = parseProctoringType(type);
         if (eventType == null) {
             log.debug("Ignoring unrecognised proctoring event '{}' on session {}", type, sessionId);
-            return;
+            return false;
         }
 
         InterviewSession session = requireSession(sessionId);
+        OffsetDateTime occurredAt = parseTimestamp(occurredAtIso);
+
+        // The same event can arrive twice: once over the live WebSocket, and
+        // again in the batch a reconnecting browser replays because it cannot
+        // know what got through before the socket dropped. Counting it twice
+        // would overstate a candidate's tab switches — a number a recruiter
+        // reads as evidence about a person, so it has to be right.
+        if (proctoringRepository.existsBySessionIdAndEventTypeAndOccurredAt(sessionId, eventType, occurredAt)) {
+            log.debug("Duplicate proctoring event ignored: sessionId={} type={}", sessionId, eventType);
+            return false;
+        }
 
         ProctoringEvent event = new ProctoringEvent();
         event.setCompanyId(session.getCompanyId());
         event.setSessionId(sessionId);
         event.setEventType(eventType);
-        event.setOccurredAt(parseTimestamp(occurredAtIso));
+        event.setOccurredAt(occurredAt);
         proctoringRepository.save(event);
 
         log.debug("Proctoring event recorded: sessionId={} type={}", sessionId, eventType);
+        return true;
     }
+
+    /**
+     * Records a batch of proctoring events replayed over REST (PRD §11).
+     *
+     * <p>Exists because the WebSocket is the <em>only</em> delivery path
+     * otherwise, and it is the path most likely to fail on exactly the
+     * connections where proctoring matters. A candidate on a flaky link
+     * generates more of these signals and delivers fewer of them, which biases
+     * the record in a way nobody reading the report can see.
+     *
+     * <p>Each event is handled independently: one malformed entry must not
+     * discard the rest of the batch, because the client has already dropped
+     * its buffer by the time it learns the request failed.
+     *
+     * @return how many events were newly recorded, ignoring duplicates
+     */
+    @Transactional
+    public int recordProctoringEvents(UUID sessionId, List<ProctoringEventSubmission> events) {
+        if (events == null || events.isEmpty()) {
+            return 0;
+        }
+        int recorded = 0;
+        for (ProctoringEventSubmission submission : events) {
+            if (submission != null
+                    && recordProctoringEvent(sessionId, submission.type(), submission.occurredAt())) {
+                recorded++;
+            }
+        }
+        log.debug("Proctoring replay: sessionId={} submitted={} recorded={}",
+                sessionId, events.size(), recorded);
+        return recorded;
+    }
+
+    /** One replayed proctoring signal. */
+    public record ProctoringEventSubmission(String type, String occurredAt) {}
 
     // =========================================================================
     // session.end

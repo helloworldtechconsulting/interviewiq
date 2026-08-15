@@ -113,12 +113,47 @@ variable "worker_max_replicas" {
 
 variable "hikari_pool_size" {
   description = <<-EOT
-    HikariCP connections per web pod. Arch v4.0 §5.4: a db.t4g.micro-class
-    instance allows ~112 connections, and 6 web x 10 + 4 worker x 6 = 84 leaves
-    headroom. Verify with SHOW max_connections after provisioning.
+    HikariCP connections per WEB pod (Arch v4.0 §5.4).
+
+    Web pods serve request traffic, so their pool is sized for concurrency
+    rather than throughput.
   EOT
   type        = number
   default     = 10
+}
+
+variable "worker_hikari_pool_size" {
+  description = <<-EOT
+    HikariCP connections per WORKER pod.
+
+    Smaller than the web pool on purpose. Workers run a fixed number of polling
+    loops claiming batches with FOR UPDATE SKIP LOCKED; concurrency is bounded
+    by the number of pollers, not by inbound requests, so a large pool would
+    reserve connections that are never used while still counting against the
+    database's ceiling.
+
+    This existing as a separate variable is the point. It previously did not,
+    so worker pods silently fell back to the application.yml default of 10 and
+    peak usage was 6x10 + 4x10 = 100 against a ~112 connection limit — while
+    the comment here claimed 84. Twelve spare connections is not enough to
+    survive a rolling deploy, where old and new pods hold pools at the same
+    time.
+  EOT
+  type        = number
+  default     = 6
+}
+
+variable "database_max_connections" {
+  description = <<-EOT
+    Connections the managed PostgreSQL instance allows. Used only to check that
+    a fully scaled-out deployment cannot exhaust it — see the check block in
+    deployment_web.tf.
+
+    Verify against the real instance with SHOW max_connections; the default
+    here is the db.t4g.micro-class figure Arch v4.0 §5.4 quotes.
+  EOT
+  type        = number
+  default     = 112
 }
 
 variable "bucket_capacity" {
@@ -141,4 +176,36 @@ variable "enable_keda" {
   EOT
   type        = bool
   default     = true
+}
+
+# ── Observability (Arch v4.0 §3, PRD §8) ────────────────────────────────────
+
+variable "monitoring_enabled" {
+  description = <<-EOT
+    Provision Prometheus, Grafana and Alertmanager in this environment.
+
+    Toggleable because the stack is not free: it wants roughly 1.5 GB of
+    requests, which is material on a two-node staging cluster. Production
+    should always have it on.
+  EOT
+  type        = bool
+  default     = true
+}
+
+variable "kube_prometheus_stack_version" {
+  description = "Pinned chart version — an unpinned Helm chart makes every apply a different deployment."
+  type        = string
+  default     = "65.1.1"
+}
+
+variable "metrics_retention" {
+  description = "How long Prometheus keeps samples. Local storage, so this is bounded by disk."
+  type        = string
+  default     = "15d"
+}
+
+variable "grafana_admin_password" {
+  description = "Grafana admin password. Supplied from the environment's secret store, never defaulted."
+  type        = string
+  sensitive   = true
 }
