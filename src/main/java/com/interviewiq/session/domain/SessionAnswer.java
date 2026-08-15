@@ -66,6 +66,17 @@ public class SessionAnswer {
     private QuestionSource questionSource = QuestionSource.AI;
 
     /**
+     * Bank-local id of the question this answered, or null for follow-ups and
+     * employer questions (V057).
+     *
+     * <p>This is what lets a score computed minutes later, in a different
+     * service, be folded back into the variance of the question that produced it
+     * — the signal auto-retirement depends on (INTIQ-93).
+     */
+    @Column(name = "bank_question_id", length = 50)
+    private String bankQuestionId;
+
+    /**
      * A follow-up pushed by the followup workflow rather than drawn from the
      * pre-generated bank. Follow-ups share the index of the question they
      * follow, and are distinguished by this flag.
@@ -135,6 +146,9 @@ public class SessionAnswer {
 
     public String getQuestionText() { return questionText; }
     public void setQuestionText(String questionText) { this.questionText = questionText; }
+
+    public String getBankQuestionId() { return bankQuestionId; }
+    public void setBankQuestionId(String bankQuestionId) { this.bankQuestionId = bankQuestionId; }
 
     public QuestionSource getQuestionSource() { return questionSource; }
     public void setQuestionSource(QuestionSource questionSource) { this.questionSource = questionSource; }

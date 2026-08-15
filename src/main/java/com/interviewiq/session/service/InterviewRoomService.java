@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.interviewiq.ai.service.FollowUpService;
 import com.interviewiq.candidate.domain.Candidate;
+import com.interviewiq.ai.service.QuestionRetirementService;
 import com.interviewiq.candidate.infrastructure.CandidateRepository;
 import com.interviewiq.job.domain.DurationTier;
 import com.interviewiq.session.domain.InterviewSession;
@@ -70,6 +71,7 @@ public class InterviewRoomService {
     private final SessionCompletionService completionService;
     private final FollowUpService followUpService;
     private final CandidateRepository candidateRepository;
+    private final QuestionRetirementService retirementService;
     private final ObjectMapper objectMapper;
 
     public InterviewRoomService(InterviewSessionRepository sessionRepository,
@@ -79,6 +81,7 @@ public class InterviewRoomService {
                                 SessionCompletionService completionService,
                                 FollowUpService followUpService,
                                 CandidateRepository candidateRepository,
+                                QuestionRetirementService retirementService,
                                 ObjectMapper objectMapper) {
         this.sessionRepository    = sessionRepository;
         this.answerRepository     = answerRepository;
@@ -87,6 +90,7 @@ public class InterviewRoomService {
         this.completionService    = completionService;
         this.followUpService      = followUpService;
         this.candidateRepository  = candidateRepository;
+        this.retirementService    = retirementService;
         this.objectMapper         = objectMapper;
     }
 
@@ -204,6 +208,9 @@ public class InterviewRoomService {
         answer.setQuestionIndex(questionIndex);
         answer.setQuestionText(questionText);
         answer.setQuestionSource(sourceOf(question));
+        // Null for employer questions and follow-ups — see the column comment.
+        String bankQuestionId = question.path("bankQuestionId").asText("");
+        answer.setBankQuestionId(bankQuestionId.isBlank() ? null : bankQuestionId);
         answer.setFollowUp(false);
         answer.setDurationSeconds(Math.max(0, durationSeconds));
 
@@ -218,6 +225,8 @@ public class InterviewRoomService {
             answer.setTranscriptText(transcript);
         }
         answerRepository.save(answer);
+
+        recordTelemetry(session, question, answer);
 
         send(socket, RoomEvent.ACK, Map.of("questionIndex", questionIndex));
 
@@ -430,6 +439,41 @@ public class InterviewRoomService {
         return "EMPLOYER".equalsIgnoreCase(question.path("source").asText(""))
                 ? QuestionSource.EMPLOYER
                 : QuestionSource.AI;
+    }
+
+    /**
+     * Folds this answer into the question's telemetry (INTIQ-93 item 4).
+     *
+     * <p>Only bank questions carry a {@code bankQuestionId}. Follow-ups are
+     * generated live and never reused, and employer questions belong to the
+     * employer — neither is ours to retire, and the recorder skips both.
+     *
+     * <p><strong>Failures are absorbed.</strong> The answer is already saved and
+     * the candidate is waiting on the next question; losing a telemetry data
+     * point is a gap in a statistic, whereas throwing here would interrupt a live
+     * interview. That trade is not close.
+     *
+     * <p>The score is null at this point — it arrives at evaluation time. The row
+     * is created here so the ask/skip counts are right, and the score is folded
+     * in later by the evaluation path.
+     */
+    private void recordTelemetry(InterviewSession session, JsonNode question, SessionAnswer answer) {
+        try {
+            String bankQuestionId = answer.getBankQuestionId();
+            if (bankQuestionId == null || bankQuestionId.isBlank()) {
+                return;
+            }
+            retirementService.recordAnswer(
+                    session.getJobOpeningId(),
+                    bankQuestionId,
+                    answer.getQuestionText(),
+                    answer.isSkipped(),
+                    answer.getTranscriptText(),
+                    answer.getScore());
+        } catch (RuntimeException e) {
+            log.warn("Question telemetry not recorded for sessionId={} questionIndex={}",
+                    session.getId(), answer.getQuestionIndex(), e);
+        }
     }
 
     private ProctoringEventType parseProctoringType(String type) {
