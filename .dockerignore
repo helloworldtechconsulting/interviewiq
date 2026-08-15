@@ -1,0 +1,45 @@
+# =============================================================================
+# .dockerignore — what must NEVER enter the build context
+#
+# Without this, `docker build .` sends the whole working tree to the daemon,
+# including .git and any .env sitting in the checkout. Both then land in the
+# image: .git carries the full history (and anything ever committed to it), and
+# a .env carries live credentials. Neither is recoverable once the image ships.
+# =============================================================================
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Version control — history in an image is a credential-disclosure risk
+.git
+.gitignore
+.github
+
+# Build output, rebuilt inside the image anyway
+target/
+frontend/dist/
+frontend/node_modules/
+node_modules/
+
+# Infrastructure state — may contain secrets in plain text
+terraform/
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+
+# Local tooling and editor noise
+.idea/
+.vscode/
+.DS_Store
+*.iml
+*.log
+
+# Documentation and planning — not needed at runtime
+docs/
+*.md
+!README.md
