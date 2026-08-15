@@ -8,6 +8,7 @@ import com.interviewiq.session.domain.EvaluationReport;
 import com.interviewiq.session.domain.InterviewSession;
 import com.interviewiq.session.infrastructure.EvaluationReportRepository;
 import com.interviewiq.session.infrastructure.InterviewSessionRepository;
+import com.interviewiq.shared.config.WorkerProperties;
 import com.interviewiq.shared.domain.PipelineStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,6 +20,8 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 /**
@@ -68,6 +71,7 @@ public class EvaluationWorker {
     private final InterviewSessionRepository  sessionRepository;
     private final ChatClient                  chatClient;
     private final ObjectMapper                objectMapper;
+    private final WorkerProperties            workerProperties;
 
     /**
      * Self-reference injected lazily to route {@link #evaluateSingle} calls through
@@ -80,40 +84,63 @@ public class EvaluationWorker {
     public EvaluationWorker(EvaluationReportRepository evaluationReportRepository,
                             InterviewSessionRepository sessionRepository,
                             ChatClient chatClient,
-                            ObjectMapper objectMapper) {
+                            ObjectMapper objectMapper,
+                            WorkerProperties workerProperties) {
         this.evaluationReportRepository = evaluationReportRepository;
         this.sessionRepository          = sessionRepository;
         this.chatClient                 = chatClient;
         this.objectMapper               = objectMapper;
+        this.workerProperties           = workerProperties;
     }
 
     /**
-     * Poll for PENDING + IN_PROGRESS evaluation reports and run the AI evaluation.
-     * Runs every 30 seconds with an initial 25-second warm-up.
+     * Claims a bounded batch of evaluations and runs them.
      *
-     * <p>IN_PROGRESS items are included for crash recovery. Safe because
-     * {@code fixedDelay} prevents concurrent scheduler runs within a single JVM.
+     * <p><strong>Claiming, not polling.</strong> This previously fetched every
+     * PENDING and IN_PROGRESS row with a plain derived query and looped over
+     * them. On the 2–6 pods this application now runs on, every pod fetched the
+     * same rows: six times the LLM bill, racing writes on the same report row,
+     * and {@code generationAttempts} races that fail perfectly healthy sessions.
+     * PRD v2.1 §7.9 calls that a hard blocker on autoscaling.
+     *
+     * <p>{@link EvaluationReportRepository#claimBatch} now claims a distinct,
+     * bounded set of rows per pod with {@code FOR UPDATE SKIP LOCKED},
+     * incrementing the attempt counter under the same row lock. Rows come back
+     * already marked IN_PROGRESS, so this scheduler no longer needs to sweep
+     * IN_PROGRESS rows for crash recovery — staleness is handled inside the claim.
+     *
+     * <p>The 30-second cadence remains a safety net rather than the primary
+     * trigger: completion triggers evaluation immediately (§7.5.5), so the
+     * report does not wait for the next tick.
      */
     @Scheduled(initialDelayString = "PT25S", fixedDelayString = "PT30S")
     public void evaluatePendingReports() {
-        List<EvaluationReport> workItems =
-                evaluationReportRepository.findAllByGenerationStatusIn(
-                        List.of(PipelineStatus.PENDING, PipelineStatus.IN_PROGRESS));
+        OffsetDateTime staleBefore =
+                OffsetDateTime.now(ZoneOffset.UTC).minus(workerProperties.getStaleClaimAfter());
 
-        if (workItems.isEmpty()) return;
+        List<EvaluationReport> claimed = evaluationReportRepository.claimBatch(
+                workerProperties.getEvaluationBatchSize(), staleBefore);
 
-        log.debug("EvaluationWorker: processing {} evaluation(s) (PENDING + IN_PROGRESS recovery)",
-                workItems.size());
+        if (claimed.isEmpty()) return;
 
-        for (EvaluationReport report : workItems) {
+        log.debug("EvaluationWorker: claimed {} evaluation(s)", claimed.size());
+
+        for (EvaluationReport report : claimed) {
             self.evaluateSingle(report);  // call through proxy so @Transactional applies
         }
     }
 
+    /**
+     * Evaluates one already-claimed report.
+     *
+     * <p>The caller has claimed this row and incremented its attempt counter
+     * under a row lock, so this method must not increment it again — doing so
+     * would double-count attempts and retire reports at half the configured
+     * limit.
+     */
     @Transactional
     public void evaluateSingle(EvaluationReport report) {
-        int attempt = report.getGenerationAttempts() + 1;
-        report.setGenerationAttempts(attempt);
+        int attempt = report.getGenerationAttempts();
 
         if (attempt > maxAttempts) {
             log.warn("EvaluationWorker: max attempts ({}) exceeded for reportId={}, marking FAILED",
@@ -122,10 +149,6 @@ public class EvaluationWorker {
             evaluationReportRepository.save(report);
             return;
         }
-
-        // Mark IN_PROGRESS
-        report.setGenerationStatus(PipelineStatus.IN_PROGRESS);
-        evaluationReportRepository.save(report);
 
         try {
             InterviewSession session = sessionRepository.findById(report.getSessionId())
@@ -136,6 +159,8 @@ public class EvaluationWorker {
 
             applyScores(report, evaluationJson);
             report.setEvaluationJson(evaluationJson);
+            report.setEvidenceJson(evaluationJson);
+            report.setGeneratedAt(OffsetDateTime.now(ZoneOffset.UTC));
             report.setGenerationStatus(PipelineStatus.DONE);
             evaluationReportRepository.save(report);
 

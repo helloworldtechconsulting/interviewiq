@@ -6,8 +6,12 @@ import com.interviewiq.shared.domain.PipelineStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.util.Collection;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -36,4 +40,33 @@ public interface JobOpeningRepository extends JpaRepository<JobOpening, UUID> {
      * from the current run are always resolved before the next poll starts.
      */
     List<JobOpening> findAllByJdExtractionStatusInAndJdS3KeyIsNotNull(Collection<PipelineStatus> statuses);
+
+    /**
+     * Atomically claims job openings whose JD text needs extracting.
+     *
+     * <p>{@code FOR UPDATE SKIP LOCKED} with an explicit {@code LIMIT}, per
+     * PRD v2.1 §7.9. Tika extraction is cheap compared with an LLM call, but
+     * duplicate extraction still means duplicate object-storage reads and racing
+     * writes to the same jd_text — and there is no reason for this to be the one
+     * worker that ignores the discipline.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(value = """
+           UPDATE job_openings
+           SET jd_extraction_status   = 'IN_PROGRESS',
+               jd_extraction_claimed_at = now(),
+               updated_at             = now()
+           WHERE id IN (
+               SELECT id FROM job_openings
+               WHERE jd_s3_key IS NOT NULL
+                 AND (jd_extraction_status = 'PENDING'
+                      OR (jd_extraction_status = 'IN_PROGRESS' AND jd_extraction_claimed_at < :staleBefore))
+               ORDER BY created_at ASC
+               LIMIT :batchSize
+               FOR UPDATE SKIP LOCKED
+           )
+           RETURNING *
+           """, nativeQuery = true)
+    List<JobOpening> claimForJdExtraction(@Param("batchSize") int batchSize,
+                                          @Param("staleBefore") OffsetDateTime staleBefore);
 }

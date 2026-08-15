@@ -1,6 +1,7 @@
 package com.interviewiq.session.service;
 
 import com.interviewiq.billing.service.WalletService;
+import com.interviewiq.scheduling.service.CapacityService;
 import com.interviewiq.session.domain.InterviewSession;
 import com.interviewiq.session.domain.SessionStatus;
 import com.interviewiq.session.infrastructure.InterviewSessionRepository;
@@ -27,9 +28,10 @@ class SessionExpiryServiceTest {
 
     @Mock InterviewSessionRepository sessionRepository;
     @Mock WalletService walletService;
+    @Mock CapacityService capacityService;
 
     private SessionExpiryService service() {
-        return new SessionExpiryService(sessionRepository, walletService);
+        return new SessionExpiryService(sessionRepository, walletService, capacityService);
     }
 
     private InterviewSession session(UUID id, UUID companyId, SessionStatus status) {
@@ -45,7 +47,7 @@ class SessionExpiryServiceTest {
         UUID sessionId = UUID.randomUUID();
         UUID companyId = UUID.randomUUID();
         InterviewSession s = session(sessionId, companyId, SessionStatus.INVITED);
-        when(sessionRepository.findById(sessionId)).thenReturn(Optional.of(s));
+        when(sessionRepository.findByIdForUpdate(sessionId)).thenReturn(Optional.of(s));
 
         boolean acted = service().expireAndRelease(sessionId);
 
@@ -59,7 +61,7 @@ class SessionExpiryServiceTest {
     void nonInvitedSession_isLeftUntouched() {
         UUID sessionId = UUID.randomUUID();
         InterviewSession started = session(sessionId, UUID.randomUUID(), SessionStatus.IN_PROGRESS);
-        when(sessionRepository.findById(sessionId)).thenReturn(Optional.of(started));
+        when(sessionRepository.findByIdForUpdate(sessionId)).thenReturn(Optional.of(started));
 
         boolean acted = service().expireAndRelease(sessionId);
 
@@ -72,7 +74,7 @@ class SessionExpiryServiceTest {
     @Test
     void vanishedSession_isNoOp() {
         UUID sessionId = UUID.randomUUID();
-        when(sessionRepository.findById(sessionId)).thenReturn(Optional.empty());
+        when(sessionRepository.findByIdForUpdate(sessionId)).thenReturn(Optional.empty());
 
         boolean acted = service().expireAndRelease(sessionId);
 
