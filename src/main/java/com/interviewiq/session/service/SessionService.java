@@ -8,6 +8,7 @@ import com.interviewiq.auth.service.TokenService;
 import com.interviewiq.billing.service.WalletService;
 import com.interviewiq.candidate.domain.Candidate;
 import com.interviewiq.candidate.infrastructure.CandidateRepository;
+import com.interviewiq.company.domain.Company;
 import com.interviewiq.company.infrastructure.CompanyRepository;
 import com.interviewiq.email.service.EmailService;
 import com.interviewiq.job.domain.JobOpening;
@@ -182,13 +183,7 @@ public class SessionService {
         report.setGenerationStatus(PipelineStatus.PENDING);
         evaluationReportRepository.save(report);
 
-        // Dispatch invite email
-        String companyName = companyRepository.findById(companyId)
-                .map(c -> c.getName())
-                .orElse("InterviewIQ");
-        String inviteUrl = frontendBaseUrl + "/interview?token=" + inviteToken;
-        emailService.sendCandidateInviteEmail(
-                candidate.getEmail(), candidate.getFullName(), companyName, inviteUrl, companyId);
+        dispatchInviteEmail(companyId, candidate, inviteToken);
 
         log.info("Session created: sessionId={} companyId={} candidateId={}",
                 session.getId(), companyId, candidate.getId());
@@ -224,6 +219,90 @@ public class SessionService {
     @Transactional(readOnly = true)
     public SessionResponse get(UUID sessionId) {
         return SessionResponse.from(requireSession(sessionId));
+    }
+
+    /**
+     * Re-invites a candidate, doing one of two different things depending on where
+     * the existing session ended up.
+     *
+     * <p>Both are called "reinvite" by recruiters and they are not the same
+     * operation, so the endpoint resolves which one applies rather than making the
+     * caller know:
+     *
+     * <ul>
+     *   <li><strong>Still live ({@code INVITED} / {@code SCHEDULED})</strong> — the
+     *       candidate mislaid the email. Resend it and extend the invite window.
+     *       The token is deliberately <em>not</em> rotated: the whole reason for
+     *       the request is that the candidate cannot find their link, and rotating
+     *       would break the copy they might still have. No money moves, because the
+     *       existing reservation is still held.</li>
+     *   <li><strong>Finished unused ({@code EXPIRED} / {@code CANCELLED} /
+     *       {@code ERROR})</strong> — there is nothing to resend. A new session is
+     *       created, which takes a fresh ₹100 reservation and a fresh token. The
+     *       old session is left as it is: it is a terminal state and the history of
+     *       an expired invite is worth keeping.</li>
+     * </ul>
+     *
+     * <p>A session that is under way or already scored is refused. Re-inviting
+     * someone mid-interview would give them a second concurrent room, and
+     * re-inviting after a completed interview means charging twice for a candidate
+     * who already has a report — if a genuine re-interview is wanted, that is a new
+     * session and should look like one.
+     */
+    @Auditable(action = "SESSION_REINVITED", entityType = "SESSION", entityIdArg = 0)
+    @Transactional
+    public SessionResponse reinvite(UUID sessionId) {
+        InterviewSession session = requireSession(sessionId);
+
+        return switch (session.getStatus()) {
+            case INVITED, SCHEDULED -> resendInvite(session);
+            case EXPIRED, CANCELLED, ERROR -> createReplacementSession(session);
+            case IN_PROGRESS, EVALUATING -> throw new SessionStateException(
+                    "This interview is already under way, so a new invite cannot be sent.");
+            case COMPLETED -> throw new SessionStateException(
+                    "This candidate has already completed their interview. "
+                            + "Create a new interview if you want to assess them again.");
+        };
+    }
+
+    /** Resends the existing invite and pushes its expiry out, without touching the token or the wallet. */
+    private SessionResponse resendInvite(InterviewSession session) {
+        Candidate candidate = candidateRepository.findById(session.getCandidateId())
+                .orElseThrow(() -> new ResourceNotFoundException("Candidate", session.getCandidateId()));
+
+        // The stored value is a hash, so the original token cannot be recovered.
+        // Reissuing the same claims yields a link that resolves to the same session,
+        // and the hash is re-stored so both the old and new emails work.
+        String inviteToken = tokenService.generateInviteToken(
+                session.getId(), candidate.getId(), session.getCompanyId());
+        session.setInviteTokenHash(tokenService.hashToken(inviteToken));
+        session.setInviteExpiresAt(
+                OffsetDateTime.now(ZoneOffset.UTC)
+                        .plus(securityProperties.getInvite().getExpiration()));
+        sessionRepository.save(session);
+
+        dispatchInviteEmail(session.getCompanyId(), candidate, inviteToken);
+
+        log.info("Invite resent: sessionId={} candidateId={}", session.getId(), candidate.getId());
+        return SessionResponse.from(session);
+    }
+
+    /** Creates a fresh session for the same candidate and job after an unused one ended. */
+    private SessionResponse createReplacementSession(InterviewSession previous) {
+        log.info("Creating replacement session: previousSessionId={} previousStatus={}",
+                previous.getId(), previous.getStatus());
+        return create(new CreateSessionRequest(
+                previous.getJobOpeningId(), previous.getCandidateId(), null));
+    }
+
+    /** Sends the candidate invite email for a session. */
+    private void dispatchInviteEmail(UUID companyId, Candidate candidate, String inviteToken) {
+        String companyName = companyRepository.findById(companyId)
+                .map(Company::getName)
+                .orElse("InterviewIQ");
+        String inviteUrl = frontendBaseUrl + "/interview?token=" + inviteToken;
+        emailService.sendCandidateInviteEmail(
+                candidate.getEmail(), candidate.getFullName(), companyName, inviteUrl, companyId);
     }
 
     /**

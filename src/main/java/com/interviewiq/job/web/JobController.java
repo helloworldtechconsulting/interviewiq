@@ -1,5 +1,6 @@
 package com.interviewiq.job.web;
 
+import com.interviewiq.job.domain.JobStatus;
 import com.interviewiq.job.dto.CreateJobRequest;
 import com.interviewiq.job.dto.JdUploadUrlResponse;
 import com.interviewiq.job.dto.JobResponse;
@@ -58,8 +59,11 @@ public class JobController {
     }
 
     @GetMapping
-    public ApiResponse<Page<JobResponse>> list(@PageableDefault(size = 20) Pageable pageable) {
-        return ApiResponse.ok(jobService.list(pageable));
+    public ApiResponse<Page<JobResponse>> list(
+            @RequestParam(required = false) JobStatus status,
+            @RequestParam(required = false) String search,
+            @PageableDefault(size = 20) Pageable pageable) {
+        return ApiResponse.ok(jobService.list(status, search, pageable));
     }
 
     @GetMapping("/{id}")

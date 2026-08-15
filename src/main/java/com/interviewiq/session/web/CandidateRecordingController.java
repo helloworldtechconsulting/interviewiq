@@ -5,7 +5,9 @@ import com.interviewiq.session.infrastructure.InterviewSessionRepository;
 import com.interviewiq.shared.dto.ApiResponse;
 import com.interviewiq.shared.exception.ResourceNotFoundException;
 import com.interviewiq.shared.security.SecurityContext;
+import com.interviewiq.storage.domain.StorageObjectType;
 import com.interviewiq.storage.domain.UploadKind;
+import com.interviewiq.storage.service.StorageObjectRecorder;
 import com.interviewiq.storage.service.StorageService;
 import com.interviewiq.storage.service.UploadKeyService;
 import jakarta.validation.constraints.NotBlank;
@@ -52,13 +54,16 @@ public class CandidateRecordingController {
     private final InterviewSessionRepository sessionRepository;
     private final StorageService storageService;
     private final UploadKeyService uploadKeyService;
+    private final StorageObjectRecorder storageObjectRecorder;
 
     public CandidateRecordingController(InterviewSessionRepository sessionRepository,
                                         StorageService storageService,
-                                        UploadKeyService uploadKeyService) {
-        this.sessionRepository = sessionRepository;
-        this.storageService    = storageService;
-        this.uploadKeyService  = uploadKeyService;
+                                        UploadKeyService uploadKeyService,
+                                        StorageObjectRecorder storageObjectRecorder) {
+        this.sessionRepository     = sessionRepository;
+        this.storageService        = storageService;
+        this.uploadKeyService      = uploadKeyService;
+        this.storageObjectRecorder = storageObjectRecorder;
     }
 
     /**
@@ -102,7 +107,10 @@ public class CandidateRecordingController {
 
         String ownedKey = uploadKeyService.validateOwnedKey(
                 UploadKind.RECORDING, session.getCompanyId(), sessionId, body.get("objectKey"));
-        storageService.verifyUploadedObject(ownedKey, UploadKind.RECORDING);
+        StorageService.VerifiedObject verified =
+                storageService.verifyUploadedObject(ownedKey, UploadKind.RECORDING);
+        storageObjectRecorder.record(
+                session.getCompanyId(), sessionId, StorageObjectType.RECORDING, ownedKey, verified);
 
         session.setRecordingS3Key(ownedKey);
         sessionRepository.save(session);

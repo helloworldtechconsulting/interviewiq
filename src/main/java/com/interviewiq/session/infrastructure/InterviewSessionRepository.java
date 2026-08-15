@@ -15,6 +15,7 @@ import org.springframework.data.repository.query.Param;
 import java.time.OffsetDateTime;
 import java.util.Collection;
 import java.util.List;
+import java.util.Collection;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -31,6 +32,21 @@ public interface InterviewSessionRepository extends JpaRepository<InterviewSessi
 
     /** Company-wide listing filtered by status. */
     Page<InterviewSession> findAllByCompanyIdAndStatusOrderByCreatedAtDesc(UUID companyId, SessionStatus status, Pageable pageable);
+
+    /**
+     * Whether this candidate has ever been invited.
+     *
+     * <p>Used as the edit guard in {@code CandidateService.update} — a session
+     * existing at all means an invite email has been sent, whatever state that
+     * session has since reached.
+     */
+    boolean existsByCandidateId(UUID candidateId);
+
+    /** Whether the candidate has a session in a specific state. */
+    boolean existsByCandidateIdAndStatus(UUID candidateId, SessionStatus status);
+
+    /** Whether the candidate has a session in any of the given states. */
+    boolean existsByCandidateIdAndStatusIn(UUID candidateId, Collection<SessionStatus> statuses);
 
     Optional<InterviewSession> findByInviteTokenHash(String inviteTokenHash);
 
