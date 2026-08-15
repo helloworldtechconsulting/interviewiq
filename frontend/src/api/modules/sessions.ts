@@ -3,6 +3,7 @@ import type {
   CreateSessionRequest,
   Evaluation,
   Page,
+  ProctoringEvent,
   Session,
 } from "@/types";
 
@@ -26,6 +27,25 @@ export const sessionsApi = {
     apiClient
       .post<Session>(`${BASE}/${sessionId}/cancel`)
       .then((r) => r.data),
+
+  /** What the browser observed during the interview — no verdict attached. */
+  getProctoringEvents: (sessionId: string) =>
+    apiClient
+      .get<ProctoringEvent[]>(`${BASE}/${sessionId}/proctoring`)
+      .then((r) => r.data),
+
+  /** The recruiter's private notes. Never sent to a model. */
+  saveNotes: (sessionId: string, notes: string) =>
+    apiClient.patch(`${BASE}/${sessionId}/notes`, { notes }).then((r) => r.data),
+
+  getRecordingUrl: (sessionId: string) =>
+    apiClient
+      .get<{ recordingUrl: string }>(`${BASE}/${sessionId}/recording`)
+      .then((r) => r.data.recordingUrl),
+
+  /** Fires the resend-or-replace logic; the returned session may be a new one. */
+  reinvite: (sessionId: string) =>
+    apiClient.post(`${BASE}/${sessionId}/reinvite`).then((r) => r.data),
 
   getEvaluation: (sessionId: string) =>
     apiClient

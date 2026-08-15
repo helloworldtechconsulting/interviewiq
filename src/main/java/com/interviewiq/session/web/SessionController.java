@@ -1,5 +1,6 @@
 package com.interviewiq.session.web;
 
+import com.interviewiq.session.domain.ProctoringEvent;
 import com.interviewiq.session.domain.SessionStatus;
 import com.interviewiq.session.dto.CreateSessionRequest;
 import com.interviewiq.session.dto.EvaluationReportResponse;
@@ -16,6 +17,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -24,6 +26,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -128,6 +131,35 @@ public class SessionController {
                         "attachment; filename=\"" + artifactService.transcriptFilename(id) + "\"")
                 .contentType(MediaType.TEXT_PLAIN)
                 .body(artifactService.transcript(id));
+    }
+
+    /**
+     * GET /api/v1/sessions/{id}/proctoring
+     *
+     * <p>What the browser observed during the interview — tab switches, camera
+     * drops. Returned as a plain list with no verdict attached: these signals are
+     * weak individually, and a system that summarised them as "suspected
+     * cheating" would be making a judgement about a person, with their job at
+     * stake, that it has no basis for.
+     */
+    @GetMapping("/{id}/proctoring")
+    public ApiResponse<List<ProctoringEvent>> getProctoringEvents(@PathVariable UUID id) {
+        return ApiResponse.ok(artifactService.proctoringEvents(id));
+    }
+
+    /**
+     * PATCH /api/v1/sessions/{id}/notes
+     *
+     * <p>The recruiter's private notes on a report. Never sent to a model —
+     * these are their own words about a candidate, and feeding them back into
+     * scoring would let an opinion formed after the interview influence the
+     * evaluation of it.
+     */
+    @PatchMapping("/{id}/notes")
+    public ApiResponse<Void> saveNotes(@PathVariable UUID id,
+                                       @RequestBody Map<String, String> body) {
+        artifactService.saveEmployerNotes(id, body.get("notes"));
+        return ApiResponse.ok();
     }
 
     @GetMapping("/{id}/evaluation")

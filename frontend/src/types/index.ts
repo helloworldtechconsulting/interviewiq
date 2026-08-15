@@ -61,6 +61,9 @@ export type SessionStatus =
   | "COMPLETED"     // report ready
   | "CANCELLED"
   | "EXPIRED"
+  /** Booked a slot and did not attend (V054). Distinct from EXPIRED, which
+      means an invite was never taken up at all — and not charged. */
+  | "NO_SHOW"
   | "ERROR";
 
 /**
@@ -483,6 +486,11 @@ export interface Evaluation {
   /** True when the candidate answered some but not all questions (§7.5.7). */
   partial?: boolean;
   transcript?: string;
+  /**
+   * The recruiter's private notes (INTIQ-29). Never sent to a model — an
+   * opinion formed after the interview must not influence the evaluation of it.
+   */
+  employerNotes?: string | null;
   createdAt: string;
 }
 
@@ -610,4 +618,20 @@ declare global {
       open: () => void;
     };
   }
+}
+
+/**
+ * One thing the browser noticed during an interview (INTIQ-29).
+ *
+ * Deliberately carries no severity or verdict. These signals are weak
+ * individually — a tab switch might be someone checking the time — and
+ * summarising them into a judgement about a person, with their job at stake,
+ * is not something the system has a basis for.
+ */
+export interface ProctoringEvent {
+  id: string;
+  sessionId: string;
+  eventType: "TAB_SWITCH" | "CAMERA_OFF";
+  metadata?: string | null;
+  occurredAt: string;
 }

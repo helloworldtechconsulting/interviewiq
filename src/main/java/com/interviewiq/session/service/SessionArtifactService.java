@@ -2,10 +2,14 @@ package com.interviewiq.session.service;
 
 import com.interviewiq.candidate.domain.Candidate;
 import com.interviewiq.candidate.infrastructure.CandidateRepository;
+import com.interviewiq.session.domain.EvaluationReport;
 import com.interviewiq.session.domain.InterviewSession;
+import com.interviewiq.session.domain.ProctoringEvent;
 import com.interviewiq.session.domain.QuestionSource;
 import com.interviewiq.session.domain.SessionAnswer;
+import com.interviewiq.session.infrastructure.EvaluationReportRepository;
 import com.interviewiq.session.infrastructure.InterviewSessionRepository;
+import com.interviewiq.session.infrastructure.ProctoringEventRepository;
 import com.interviewiq.session.infrastructure.SessionAnswerRepository;
 import com.interviewiq.shared.exception.ResourceNotFoundException;
 import com.interviewiq.shared.exception.ValidationException;
@@ -62,15 +66,21 @@ public class SessionArtifactService {
     private final SessionAnswerRepository    answerRepository;
     private final CandidateRepository        candidateRepository;
     private final StorageService             storageService;
+    private final ProctoringEventRepository  proctoringRepository;
+    private final EvaluationReportRepository reportRepository;
 
     public SessionArtifactService(InterviewSessionRepository sessionRepository,
                                   SessionAnswerRepository answerRepository,
                                   CandidateRepository candidateRepository,
-                                  StorageService storageService) {
-        this.sessionRepository   = sessionRepository;
-        this.answerRepository    = answerRepository;
-        this.candidateRepository = candidateRepository;
-        this.storageService      = storageService;
+                                  StorageService storageService,
+                                  ProctoringEventRepository proctoringRepository,
+                                  EvaluationReportRepository reportRepository) {
+        this.sessionRepository    = sessionRepository;
+        this.answerRepository     = answerRepository;
+        this.candidateRepository  = candidateRepository;
+        this.storageService       = storageService;
+        this.proctoringRepository = proctoringRepository;
+        this.reportRepository     = reportRepository;
     }
 
     /**
@@ -156,6 +166,42 @@ public class SessionArtifactService {
     /** Suggested filename for a transcript download. */
     public String transcriptFilename(UUID sessionId) {
         return "interview-transcript-" + sessionId + ".txt";
+    }
+
+    /**
+     * Proctoring events for the recruiter, oldest first (§7.5.4, INTIQ-29).
+     *
+     * <p>Surfaced as a plain list with no summary verdict, and that is
+     * deliberate. Proctoring signals are weak individually — a tab switch might
+     * be someone checking the time, a camera drop might be a loose cable — and a
+     * system that turned them into "suspected cheating" would be making a
+     * judgement it has no basis for, about a person, with their job at stake.
+     * The recruiter sees what happened and decides what it means.
+     */
+    @Transactional(readOnly = true)
+    public List<ProctoringEvent> proctoringEvents(UUID sessionId) {
+        requireSession(sessionId);
+        return proctoringRepository.findAllBySessionIdOrderByOccurredAtDesc(sessionId);
+    }
+
+    /**
+     * Saves the recruiter's private notes on a report.
+     *
+     * <p>Stored on the report rather than the session because notes are about
+     * the assessment, and because the report is what gets read months later when
+     * someone asks why a decision was made. Never sent to a model: these are the
+     * recruiter's own words about a candidate, and feeding them back into
+     * scoring would let an opinion formed after the interview influence the
+     * evaluation of it.
+     */
+    @Transactional
+    public void saveEmployerNotes(UUID sessionId, String notes) {
+        UUID companyId = SecurityContext.requireCompanyId();
+        EvaluationReport report = reportRepository.findByCompanyIdAndSessionId(companyId, sessionId)
+                .orElseThrow(() -> new ResourceNotFoundException("EvaluationReport for session", sessionId));
+
+        report.setEmployerNotes(notes == null || notes.isBlank() ? null : notes.strip());
+        reportRepository.save(report);
     }
 
     private InterviewSession requireSession(UUID sessionId) {

@@ -5,7 +5,9 @@ import com.interviewiq.candidate.infrastructure.CandidateRepository;
 import com.interviewiq.session.domain.InterviewSession;
 import com.interviewiq.session.domain.QuestionSource;
 import com.interviewiq.session.domain.SessionAnswer;
+import com.interviewiq.session.infrastructure.EvaluationReportRepository;
 import com.interviewiq.session.infrastructure.InterviewSessionRepository;
+import com.interviewiq.session.infrastructure.ProctoringEventRepository;
 import com.interviewiq.session.infrastructure.SessionAnswerRepository;
 import com.interviewiq.shared.exception.ValidationException;
 import com.interviewiq.shared.security.EmployerPrincipal;
@@ -48,10 +50,13 @@ class SessionArtifactServiceTest {
     @Mock SessionAnswerRepository    answerRepository;
     @Mock CandidateRepository        candidateRepository;
     @Mock StorageService             storageService;
+    @Mock ProctoringEventRepository  proctoringRepository;
+    @Mock EvaluationReportRepository reportRepository;
 
     private SessionArtifactService service() {
         return new SessionArtifactService(
-                sessionRepository, answerRepository, candidateRepository, storageService);
+                sessionRepository, answerRepository, candidateRepository, storageService,
+                proctoringRepository, reportRepository);
     }
 
     @BeforeEach

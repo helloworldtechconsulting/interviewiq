@@ -14,4 +14,13 @@ public interface ProctoringEventRepository extends JpaRepository<ProctoringEvent
     long countBySessionIdAndEventType(UUID sessionId, ProctoringEventType eventType);
 
     List<ProctoringEvent> findAllBySessionIdAndEventTypeOrderByOccurredAtAsc(UUID sessionId, ProctoringEventType eventType);
+
+    /**
+     * Every proctoring event for a session, oldest first (INTIQ-29).
+     *
+     * <p>Chronological rather than grouped by type on purpose: three tab
+     * switches in the last two minutes reads very differently from three spread
+     * across an hour, and only the ordering shows that.
+     */
+    List<ProctoringEvent> findAllBySessionIdOrderByOccurredAtAsc(UUID sessionId);
 }
