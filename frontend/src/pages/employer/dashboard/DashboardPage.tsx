@@ -125,10 +125,10 @@ export function DashboardPage() {
         />
         <StatCard
           title="Wallet Balance"
-          value={wallet ? formatRupees(wallet.balancePaise) : "—"}
+          value={wallet ? formatRupees(wallet.totalBalancePaise) : "—"}
           sub={
             wallet
-              ? `~${Math.floor(wallet.balancePaise / 5000)} sessions remaining`
+              ? `~${Math.floor(wallet.totalBalancePaise / 5000)} sessions remaining`
               : "Loading…"
           }
           icon={<TrendingUp className="h-4 w-4" />}

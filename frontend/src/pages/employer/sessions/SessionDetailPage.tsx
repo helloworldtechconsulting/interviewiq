@@ -149,7 +149,12 @@ export function SessionDetailPage() {
     // Poll every 10s while session is running so status updates live
     refetchInterval: (query) => {
       const status = query.state.data?.status;
-      return status === "INVITED" || status === "STARTED" ? 10_000 : false;
+      // Poll through EVALUATING too — the report lands without any action from
+      // the recruiter, and the soft target is ~5 minutes (§7.5.5).
+      return status === "INVITED" || status === "SCHEDULED"
+        || status === "IN_PROGRESS" || status === "EVALUATING"
+        ? 10_000
+        : false;
     },
   });
 
@@ -208,7 +213,9 @@ export function SessionDetailPage() {
       ]
     : [];
 
-  const canCancel = session.status === "INVITED" || session.status === "STARTED";
+  // Cancellable before the interview starts. §7.4.4: valid from INVITED or
+  // SCHEDULED — once IN_PROGRESS the candidate is mid-interview.
+  const canCancel = session.status === "INVITED" || session.status === "SCHEDULED";
 
   return (
     <div className="space-y-6">
@@ -503,13 +510,13 @@ export function SessionDetailPage() {
                 <p className="mt-1 max-w-xs text-sm text-muted-foreground">
                   {session.status === "INVITED"
                     ? "The evaluation report will appear here once the interview is completed."
-                    : session.status === "STARTED"
+                    : session.status === "IN_PROGRESS"
                     ? "The interview is in progress. Check back once it completes."
                     : "No evaluation is available for this session."}
                 </p>
 
                 {/* Live polling indicator for in-progress */}
-                {(session.status === "INVITED" || session.status === "STARTED") && (
+                {(session.status === "INVITED" || session.status === "IN_PROGRESS") && (
                   <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground">
                     <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-primary" />
                     Auto-refreshing every 10s

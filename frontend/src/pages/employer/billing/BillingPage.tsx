@@ -288,7 +288,9 @@ export function BillingPage() {
   const totalPages = txPage?.totalPages ?? 0;
 
   const txLabel: Record<TransactionType, string> = {
-    TOPUP: "Wallet Top-up",
+    PROMO_CREDIT: "Promotional credit",
+  PROMO_EXPIRY: "Promotional credit expired",
+  TOPUP: "Wallet Top-up",
     RESERVATION: "Session Reserved",
     SETTLEMENT: "Interview Session",
     RELEASE: "Reservation Released",
@@ -327,10 +329,10 @@ export function BillingPage() {
             ) : (
               <>
                 <p className="text-3xl font-bold">
-                  {wallet ? formatRupees(wallet.balancePaise) : "—"}
+                  {wallet ? formatRupees(wallet.totalBalancePaise) : "—"}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  ~{wallet ? Math.floor(wallet.balancePaise / 5000) : 0} sessions
+                  ~{wallet ? Math.floor(wallet.totalBalancePaise / 5000) : 0} sessions
                   remaining
                 </p>
               </>

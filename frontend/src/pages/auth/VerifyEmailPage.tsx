@@ -85,7 +85,7 @@ export function VerifyEmailPage() {
     mutationFn: (data: FormData) =>
       authApi.verifyEmail({ email, otp: data.otp }, slug),
     onSuccess(data) {
-      authStore.getState().setTokens(data.accessToken, data.refreshToken);
+      authStore.getState().setAccessToken(data.accessToken);
       toast.success("Email verified! Welcome aboard.");
       navigate("/app/dashboard", { replace: true });
     },
