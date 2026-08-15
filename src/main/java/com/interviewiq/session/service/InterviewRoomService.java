@@ -2,6 +2,9 @@ package com.interviewiq.session.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.interviewiq.ai.service.FollowUpService;
+import com.interviewiq.candidate.domain.Candidate;
+import com.interviewiq.candidate.infrastructure.CandidateRepository;
 import com.interviewiq.job.domain.DurationTier;
 import com.interviewiq.session.domain.InterviewSession;
 import com.interviewiq.session.domain.ProctoringEvent;
@@ -65,6 +68,8 @@ public class InterviewRoomService {
     private final ProctoringEventRepository proctoringRepository;
     private final RoomSessionRegistry registry;
     private final SessionCompletionService completionService;
+    private final FollowUpService followUpService;
+    private final CandidateRepository candidateRepository;
     private final ObjectMapper objectMapper;
 
     public InterviewRoomService(InterviewSessionRepository sessionRepository,
@@ -72,12 +77,16 @@ public class InterviewRoomService {
                                 ProctoringEventRepository proctoringRepository,
                                 RoomSessionRegistry registry,
                                 SessionCompletionService completionService,
+                                FollowUpService followUpService,
+                                CandidateRepository candidateRepository,
                                 ObjectMapper objectMapper) {
         this.sessionRepository    = sessionRepository;
         this.answerRepository     = answerRepository;
         this.proctoringRepository = proctoringRepository;
         this.registry             = registry;
         this.completionService    = completionService;
+        this.followUpService      = followUpService;
+        this.candidateRepository  = candidateRepository;
         this.objectMapper         = objectMapper;
     }
 
@@ -212,6 +221,23 @@ public class InterviewRoomService {
 
         send(socket, RoomEvent.ACK, Map.of("questionIndex", questionIndex));
 
+        // PRD §7.5.2 step 9: ask whether this answer warrants a follow-up before
+        // moving on. Only for real answers — a follow-up is asked at most once
+        // per question, so a follow-up never triggers another.
+        if (!answer.isSkipped()) {
+            FollowUpService.Decision decision = followUpService.decide(
+                    questionText, transcript, candidateFor(session));
+
+            if (decision.shouldFollowUp()) {
+                persistFollowUp(session, questionIndex, decision.question());
+                send(socket, RoomEvent.FOLLOWUP_QUESTION, Map.of(
+                        "text", decision.question(),
+                        "questionIndex", questionIndex,
+                        "isFollowUp", true));
+                return;
+            }
+        }
+
         int nextIndex = questionIndex + 1;
         if (nextIndex >= questions.size()) {
             // The bank is exhausted. The room sends session.end next; the server
@@ -225,6 +251,33 @@ public class InterviewRoomService {
             return;
         }
         pushQuestionAt(session, socket, nextIndex);
+    }
+
+    /**
+     * Records the follow-up as its own answer row, awaiting the candidate's reply.
+     *
+     * <p>Shares the parent question's index and is distinguished by the
+     * {@code isFollowUp} flag, which is also what the unique constraint keys on —
+     * so a repeated push cannot create two rows.
+     */
+    private void persistFollowUp(InterviewSession session, int questionIndex, String text) {
+        SessionAnswer followUp = answerRepository
+                .findBySessionIdAndQuestionIndexAndFollowUp(session.getId(), questionIndex, true)
+                .orElseGet(SessionAnswer::new);
+
+        followUp.setCompanyId(session.getCompanyId());
+        followUp.setSessionId(session.getId());
+        followUp.setQuestionIndex(questionIndex);
+        followUp.setQuestionText(text);
+        // A follow-up is always generated, never employer-supplied — employer
+        // questions are asked verbatim and are not probed further.
+        followUp.setQuestionSource(QuestionSource.AI);
+        followUp.setFollowUp(true);
+        answerRepository.save(followUp);
+    }
+
+    private Candidate candidateFor(InterviewSession session) {
+        return candidateRepository.findById(session.getCandidateId()).orElse(null);
     }
 
     // =========================================================================
