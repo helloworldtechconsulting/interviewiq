@@ -18,6 +18,7 @@ import com.interviewiq.shared.exception.AiServiceException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
@@ -72,7 +73,7 @@ public class EvaluationService {
 
     public EvaluationService(
             @Qualifier(AiConfig.EVALUATION_CLIENT) ChatClient evaluationClient,
-            @Qualifier(AiConfig.SHADOW_CLIENT) ChatClient shadowClient,
+            @Qualifier(AiConfig.SHADOW_CLIENT) ObjectProvider<ChatClient> shadowClientProvider,
             PromptTemplateService prompts,
             PiiRedactionService redaction,
             EvidenceValidator evidenceValidator,
@@ -83,7 +84,11 @@ public class EvaluationService {
             QuestionRetirementService retirementService,
             ObjectMapper objectMapper) {
         this.evaluationClient  = evaluationClient;
-        this.shadowClient      = shadowClient;
+        // ObjectProvider, not a direct ChatClient. AiConfig's shadow bean method
+        // returns null when shadow mode is off, and Spring reads that as "no
+        // such bean" — a plain constructor parameter therefore fails to resolve
+        // and the whole application refuses to start on the default config.
+        this.shadowClient      = shadowClientProvider.getIfAvailable();
         this.prompts           = prompts;
         this.redaction         = redaction;
         this.evidenceValidator = evidenceValidator;

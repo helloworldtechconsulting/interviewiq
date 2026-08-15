@@ -55,7 +55,8 @@ public class WebhookController {
      * are not consistent about header casing.
      */
     @PostMapping("/email")
-    public ResponseEntity<Void> email(@RequestBody byte[] rawBody, HttpHeaders headers) {
+    public ResponseEntity<Void> email(@RequestBody byte[] rawBody,
+                                      @RequestHeader HttpHeaders headers) {
         String signature = headers.getFirst(mailProperties.getWebhookSignatureHeader());
         emailWebhookService.handle(rawBody, signature == null ? "" : signature);
         return ResponseEntity.ok().build();
