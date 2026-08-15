@@ -164,6 +164,31 @@
             <artifactId>spring-ai-starter-model-openai</artifactId>
         </dependency>
 
+        <!-- ── Spring AI — Anthropic integration ────────────── -->
+        <!--    Both starters are present because PRD v2.1 §9.1 makes vendor a
+                per-workflow configuration value, not a build-time choice. The
+                evaluation vendor is "undecided by design": §13.1 calls for
+                shadow-running GPT-5.4-mini against Claude Haiku 4.5 over the
+                first ~50 interviews and selecting on measured score-to-hire
+                correlation. Both ChatModels implement ChatClient, so switching
+                is a bean qualifier rather than a rewrite.                       -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-model-anthropic</artifactId>
+        </dependency>
+
+        <!-- ── StringTemplate — prompt templates ────────────── -->
+        <!--    PRD §7.5.1: "Prompts live as StringTemplate .st files under
+                resources/prompts so they can be iterated without a code change."
+                Chosen over string concatenation precisely because prompt
+                iteration is expected to be frequent and shouldn't need a
+                redeploy of compiled code to review a wording change.            -->
+        <dependency>
+            <groupId>org.antlr</groupId>
+            <artifactId>ST4</artifactId>
+            <version>4.3.4</version>
+        </dependency>
+
         <!-- ── Micrometer Prometheus registry ───────────────── -->
         <dependency>
             <groupId>io.micrometer</groupId>
