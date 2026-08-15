@@ -64,7 +64,7 @@ import java.util.stream.Collectors;
  * <h2>In-browser interview flow (PRD v3)</h2>
  * <ol>
  *   <li>{@link #initInterview()} — candidate opens the room; returns questions + pre-signed recording URL.</li>
- *   <li>{@link #startInterview()} — browser calls when candidate confirms camera/mic; INVITED → STARTED.</li>
+ *   <li>{@link #startInterview()} — browser calls when candidate confirms camera/mic; INVITED → IN_PROGRESS.</li>
  *   <li>{@link #completeInterview(CompleteInterviewRequest)} — browser calls after all questions; merges transcripts
  *       into {@code questionsJson}, flips to COMPLETED, settles billing, triggers evaluation.</li>
  *   <li>{@link #failInterview(String)} — browser calls on fatal error; sets ERROR state.</li>
@@ -158,7 +158,7 @@ public class SessionService {
         session.setCandidateId(req.candidateId());
         session.setStatus(SessionStatus.INVITED);
         session.setQuestionGenerationStatus(PipelineStatus.PENDING);
-        session.setScheduledAt(req.scheduledAt());
+        session.setScheduledStartAt(req.scheduledAt());
         session.setInviteExpiresAt(
                 OffsetDateTime.now(ZoneOffset.UTC)
                         .plus(securityProperties.getInvite().getExpiration()));
@@ -294,17 +294,17 @@ public class SessionService {
                 session.getQuestionsJson(),
                 uploadUrl,
                 recordingKey,
-                session.getScheduledAt(),
+                session.getScheduledStartAt(),
                 session.getInviteExpiresAt(),
                 googleVerified
         );
     }
 
     /**
-     * Transitions the session from INVITED → STARTED when the candidate confirms
+     * Transitions the session from INVITED → IN_PROGRESS when the candidate confirms
      * their camera/microphone are working and begins the interview.
      *
-     * <p>Idempotent: calling this on an already-STARTED session is a no-op that
+     * <p>Idempotent: calling this on an already-IN_PROGRESS session is a no-op that
      * returns the current session state. This handles browser refresh mid-interview.
      */
     @Transactional
@@ -314,11 +314,11 @@ public class SessionService {
                 .orElseThrow(() -> new ResourceNotFoundException("InterviewSession", sessionId));
 
         if (session.getStatus() == SessionStatus.INVITED) {
-            session.setStatus(SessionStatus.STARTED);
+            session.setStatus(SessionStatus.IN_PROGRESS);
             session.setStartedAt(OffsetDateTime.now(ZoneOffset.UTC));
             sessionRepository.save(session);
             log.info("Interview started: sessionId={}", sessionId);
-        } else if (session.getStatus() != SessionStatus.STARTED) {
+        } else if (session.getStatus() != SessionStatus.IN_PROGRESS) {
             throw new SessionStateException(
                     "Cannot start interview in current state: " + session.getStatus());
         }
@@ -332,10 +332,10 @@ public class SessionService {
         InterviewSession session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new ResourceNotFoundException("InterviewSession", sessionId));
 
-        if (session.getStatus() != SessionStatus.STARTED) {
+        if (session.getStatus() != SessionStatus.IN_PROGRESS) {
             throw new SessionStateException(
                     "Cannot complete interview in state " + session.getStatus() +
-                    ". Session must be STARTED.");
+                    ". Session must be IN_PROGRESS.");
         }
 
         String mergedJson = mergeAnswersIntoQuestionsJson(

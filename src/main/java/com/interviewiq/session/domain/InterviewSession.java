@@ -1,5 +1,6 @@
 package com.interviewiq.session.domain;
 
+import com.interviewiq.job.domain.DurationTier;
 import com.interviewiq.shared.domain.PipelineStatus;
 import jakarta.persistence.*;
 import org.hibernate.annotations.JdbcTypeCode;
@@ -11,7 +12,7 @@ import java.util.UUID;
 /**
  * A scheduled interview session linking a candidate to a job opening.
  *
- * <p>Status is the authoritative lifecycle state: INVITED → STARTED →
+ * <p>Status is the authoritative lifecycle state: INVITED → IN_PROGRESS →
  * COMPLETED | EXPIRED | ERROR | CANCELLED.
  *
  * <p>The {@code questionsJson} JSONB field is written once after the AI
@@ -47,7 +48,35 @@ public class InterviewSession {
     @Column(nullable = false, updatable = false)
     private UUID candidateId;
 
-    private OffsetDateTime scheduledAt;
+    /**
+     * When the candidate booked their interview for. NULL until they choose a
+     * time, and skipped entirely on the "Start now" path (PRD v2.1 §7.4.1).
+     */
+    private OffsetDateTime scheduledStartAt;
+
+    /**
+     * Copied from the job opening at session creation rather than read through
+     * the job. If an employer changes a job's tier after invites are out, the
+     * hard timer and bucket occupancy of already-booked sessions must not move
+     * under them.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private DurationTier durationTier = DurationTier.defaultTier();
+
+    /**
+     * When question generation finished. This is what the readiness gate tests
+     * (§7.4.3) — "Start now" is offered once this is set — and the measurement
+     * point for the question-generation SLA (max 30 minutes, typically ~20s).
+     */
+    private OffsetDateTime questionsReadyAt;
+
+    /**
+     * Recorded when the candidate had no résumé, so questions were generated
+     * from the JD alone. Surfaced on the report (§7.3).
+     */
+    @Column(nullable = false)
+    private boolean resumeMissing = false;
 
     /** BCrypt hash of the invite token. Raw token is never stored. */
     @Column(nullable = false, unique = true, length = 255)
@@ -84,6 +113,10 @@ public class InterviewSession {
 
     private Integer durationSeconds;
 
+    /**
+     * 480p WebM uploaded browser-to-storage by pre-signed PUT. The recording
+     * never traverses our application servers (§7.5.3).
+     */
     @Column(name = "recording_s3_key", length = 512)
     private String recordingS3Key;
 
@@ -148,8 +181,6 @@ public class InterviewSession {
     public String getQuestionsJson() { return questionsJson; }
     public void setQuestionsJson(String questionsJson) { this.questionsJson = questionsJson; }
 
-    public OffsetDateTime getScheduledAt() { return scheduledAt; }
-    public void setScheduledAt(OffsetDateTime scheduledAt) { this.scheduledAt = scheduledAt; }
 
     public OffsetDateTime getStartedAt() { return startedAt; }
     public void setStartedAt(OffsetDateTime startedAt) { this.startedAt = startedAt; }
@@ -188,4 +219,22 @@ public class InterviewSession {
     public String toString() {
         return "InterviewSession{id=" + id + ", candidateId=" + candidateId + ", status=" + status + "}";
     }
+
+    public OffsetDateTime getScheduledStartAt() { return scheduledStartAt; }
+    public void setScheduledStartAt(OffsetDateTime scheduledStartAt) { this.scheduledStartAt = scheduledStartAt; }
+
+    public DurationTier getDurationTier() { return durationTier; }
+    public void setDurationTier(DurationTier durationTier) { this.durationTier = durationTier; }
+
+    public OffsetDateTime getQuestionsReadyAt() { return questionsReadyAt; }
+    public void setQuestionsReadyAt(OffsetDateTime questionsReadyAt) { this.questionsReadyAt = questionsReadyAt; }
+
+    public boolean isResumeMissing() { return resumeMissing; }
+    public void setResumeMissing(boolean resumeMissing) { this.resumeMissing = resumeMissing; }
+
+    /**
+     * Whether the readiness gate (§7.4.3) is satisfied — questions have finished
+     * generating, so "Start now" may be offered.
+     */
+    public boolean areQuestionsReady() { return questionsReadyAt != null; }
 }

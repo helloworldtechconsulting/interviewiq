@@ -15,7 +15,7 @@ import java.util.UUID;
  * <ul>
  *   <li>Dispatching a bot to a session whose status is {@code COMPLETED}</li>
  *   <li>Starting a session whose question generation status is {@code PENDING}</li>
- *   <li>Cancelling a session that has already {@code STARTED}</li>
+ *   <li>Cancelling a session that has already {@code IN_PROGRESS}</li>
  * </ul>
  */
 public class SessionStateException extends InterviewIqException {
