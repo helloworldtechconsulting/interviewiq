@@ -19,6 +19,19 @@ locals {
   # 60-minute maximum interview (Comprehensive tier) plus grace.
   interview_grace_seconds = 3900
 
+  # Connections held when both deployments are scaled to their maxima.
+  peak_db_connections = (
+    (var.web_max_replicas * var.hikari_pool_size) +
+    (var.worker_max_replicas * var.worker_hikari_pool_size)
+  )
+
+  # A rolling deploy runs old and new pods together, so the real ceiling is not
+  # peak — it is peak plus whatever the surge allows. Both deployments set
+  # maxSurge = 1, so that is one extra pod's pool each.
+  rolling_deploy_db_connections = (
+    local.peak_db_connections + var.hikari_pool_size + var.worker_hikari_pool_size
+  )
+
   common_labels = {
     "app.kubernetes.io/name"       = "interviewiq"
     "app.kubernetes.io/part-of"    = "interviewiq"
@@ -282,5 +295,33 @@ resource "kubernetes_horizontal_pod_autoscaler_v2" "web" {
         }
       }
     }
+  }
+}
+
+# =============================================================================
+# Connection budget (Arch v4.0 §5.4)
+# =============================================================================
+#
+# §5.4 flags the connection maths as tight and leaves it to be verified by hand
+# after provisioning. Hand-verification does not survive contact with a later
+# change to web_max_replicas — the failure it guards against shows up only
+# under simultaneous peak load and a deploy, which is the worst possible time
+# to discover it, and presents as connection-acquisition timeouts rather than
+# as anything pointing at replica counts.
+#
+# A check block reports at plan time and does not block the apply, which is the
+# right severity: exceeding the budget is a capacity decision to make
+# deliberately (by sizing the database up), not a syntax error.
+check "database_connection_budget" {
+  assert {
+    condition = local.rolling_deploy_db_connections <= var.database_max_connections
+    error_message = format(
+      "Connection budget exceeded: %d web x %d + %d worker x %d = %d at peak, %d during a rolling deploy, against %d available. Reduce a pool size, lower a replica maximum, or size the database up.",
+      var.web_max_replicas, var.hikari_pool_size,
+      var.worker_max_replicas, var.worker_hikari_pool_size,
+      local.peak_db_connections,
+      local.rolling_deploy_db_connections,
+      var.database_max_connections,
+    )
   }
 }

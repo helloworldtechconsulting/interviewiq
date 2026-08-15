@@ -88,6 +88,23 @@ public interface EvaluationReportRepository extends JpaRepository<EvaluationRepo
     long countPendingWork();
 
     /**
+     * Age in seconds of the oldest report still waiting to be generated, or
+     * {@code null} when nothing is pending.
+     *
+     * <p>Exposed as a gauge so the PRD's 30-minute report SLA (§8) is something
+     * that can actually be alerted on. Queue <em>depth</em> alone cannot express
+     * it: a hundred reports created a minute ago is healthy, and a single one
+     * stuck for forty minutes is a breach — the same depth signal points the
+     * wrong way in both cases. Age is what the SLA is written in.
+     */
+    @Query(value = """
+           SELECT EXTRACT(EPOCH FROM (now() - MIN(created_at)))
+             FROM evaluation_reports
+            WHERE generation_status = 'PENDING'
+           """, nativeQuery = true)
+    Double oldestPendingAgeSeconds();
+
+    /**
      * Completed reports the employer has never opened (§7.7, INTIQ-73).
      *
      * <p>Scoped to {@code DONE} on purpose: a report still generating is not

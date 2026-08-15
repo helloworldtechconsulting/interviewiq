@@ -36,3 +36,9 @@ variable "r2_secret_key" {
   type      = string
   sensitive = true
 }
+
+variable "grafana_admin_password" {
+  description = "Grafana admin login. Sourced from the deployment secret store, never committed."
+  type        = string
+  sensitive   = true
+}

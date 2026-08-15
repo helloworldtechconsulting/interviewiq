@@ -1,11 +1,16 @@
 package com.interviewiq.job.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.interviewiq.ai.infrastructure.QuestionTelemetryRepository;
 import com.interviewiq.audit.annotation.Auditable;
 import com.interviewiq.job.domain.JobOpening;
 import com.interviewiq.job.domain.JobStatus;
 import com.interviewiq.job.dto.CreateJobRequest;
 import com.interviewiq.job.dto.JdUploadUrlResponse;
 import com.interviewiq.job.dto.JobResponse;
+import com.interviewiq.job.dto.QuestionBankResponse;
 import com.interviewiq.job.dto.UpdateJobRequest;
 import com.interviewiq.job.infrastructure.JobOpeningRepository;
 import com.interviewiq.shared.domain.PipelineStatus;
@@ -25,6 +30,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -53,15 +62,21 @@ public class JobService {
     private final StorageService         storageService;
     private final UploadKeyService       uploadKeyService;
     private final StorageObjectRecorder  storageObjectRecorder;
+    private final QuestionTelemetryRepository telemetryRepository;
+    private final ObjectMapper           objectMapper;
 
     public JobService(JobOpeningRepository jobOpeningRepository,
                       StorageService storageService,
                       UploadKeyService uploadKeyService,
-                      StorageObjectRecorder storageObjectRecorder) {
+                      StorageObjectRecorder storageObjectRecorder,
+                      QuestionTelemetryRepository telemetryRepository,
+                      ObjectMapper objectMapper) {
         this.jobOpeningRepository  = jobOpeningRepository;
         this.storageService        = storageService;
         this.uploadKeyService      = uploadKeyService;
         this.storageObjectRecorder = storageObjectRecorder;
+        this.telemetryRepository   = telemetryRepository;
+        this.objectMapper          = objectMapper;
     }
 
     // =========================================================================
@@ -209,6 +224,75 @@ public class JobService {
         UUID companyId = SecurityContext.requireCompanyId();
         return jobOpeningRepository.findByCompanyIdAndId(companyId, jobId)
                 .orElseThrow(() -> new ResourceNotFoundException("JobOpening", jobId));
+    }
+
+    // =========================================================================
+    // Question bank preview (PRD §11)
+    // =========================================================================
+
+    /**
+     * Returns the generated question bank for an employer to read.
+     *
+     * <p>Read-only by design — there is no edit path here. An employer who
+     * wants a specific question asked has the employer question bank
+     * (§7.3.1, INTIQ-29), which is asked verbatim and marked as theirs on the
+     * report. Letting them rewrite generated questions instead would put edited
+     * text under the "AI-generated, safety-screened" label that
+     * {@code QuestionSafetyFilter} earns, and that label needs to keep meaning
+     * what it says.
+     *
+     * <p>A bank that has not generated yet returns an empty list with its
+     * status rather than a 404 — the job exists, its bank is simply still
+     * PENDING, and that is a state the UI should render rather than an error.
+     */
+    @Transactional(readOnly = true)
+    public QuestionBankResponse questionBank(UUID jobId) {
+        JobOpening job = requireJob(jobId);
+
+        String bankJson = job.getQuestionBankJsonb();
+        if (bankJson == null || bankJson.isBlank()) {
+            return QuestionBankResponse.notGenerated(job.getQuestionBankStatus());
+        }
+
+        Set<String> retired = new HashSet<>(telemetryRepository.findRetiredQuestionIds(jobId));
+
+        try {
+            JsonNode root = objectMapper.readTree(bankJson);
+
+            Set<String> coreIds = new HashSet<>();
+            root.path("coreQuestionIds").forEach(n -> coreIds.add(n.asText()));
+
+            List<QuestionBankResponse.Question> questions = new ArrayList<>();
+            for (JsonNode q : root.path("questions")) {
+                String id = q.path("id").asText("");
+                questions.add(new QuestionBankResponse.Question(
+                        id,
+                        q.path("text").asText(""),
+                        q.path("category").asText(""),
+                        q.path("dimension").asText(""),
+                        q.path("rationale").asText(""),
+                        q.path("rank").asInt(0),
+                        coreIds.contains(id),
+                        retired.contains(id)));
+            }
+
+            int active = (int) questions.stream().filter(q -> !q.retired()).count();
+            return new QuestionBankResponse(
+                    job.getQuestionBankStatus(),
+                    job.getQuestionBankGeneratedAt(),
+                    questions.size(),
+                    active,
+                    questions);
+
+        } catch (JsonProcessingException e) {
+            // The bank column holds model output that passed parsing once, at
+            // generation time. If it no longer parses, the honest answer is
+            // "this bank is unreadable" rather than a 500 that tells the
+            // employer nothing and hides which job is affected.
+            log.error("Question bank for job {} is not parseable JSON", jobId, e);
+            throw new ValidationException(
+                    "The question bank for this job could not be read. Regenerate it to continue.");
+        }
     }
 
     // =========================================================================

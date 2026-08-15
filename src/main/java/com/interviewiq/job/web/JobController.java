@@ -4,6 +4,7 @@ import com.interviewiq.job.domain.JobStatus;
 import com.interviewiq.job.dto.CreateJobRequest;
 import com.interviewiq.job.dto.JdUploadUrlResponse;
 import com.interviewiq.job.dto.JobResponse;
+import com.interviewiq.job.dto.QuestionBankResponse;
 import com.interviewiq.job.dto.UpdateJobRequest;
 import com.interviewiq.job.service.JobService;
 import com.interviewiq.shared.dto.ApiResponse;
@@ -88,6 +89,19 @@ public class JobController {
      * GET /api/v1/jobs/{id}/jd-upload-url?contentType=application/pdf
      * Returns a presigned S3 PUT URL for uploading the JD document.
      */
+    /**
+     * GET /api/v1/jobs/{id}/question-bank
+     *
+     * <p>The questions every candidate for this opening will be drawn from
+     * (PRD §11). Read-only: employers who want a specific question asked use
+     * their own question bank, which is asked verbatim and attributed to them
+     * on the report.
+     */
+    @GetMapping("/{id}/question-bank")
+    public ApiResponse<QuestionBankResponse> getQuestionBank(@PathVariable UUID id) {
+        return ApiResponse.ok(jobService.questionBank(id));
+    }
+
     @GetMapping("/{id}/jd-upload-url")
     public ApiResponse<JdUploadUrlResponse> getJdUploadUrl(
             @PathVariable UUID id,

@@ -97,6 +97,12 @@ module "workload" {
   worker_max_replicas = 4
   hikari_pool_size    = 10
   bucket_capacity     = 25
+
+  # Observability. Always on in production — Arch v4.0 §9 lists owning the
+  # monitoring stack as a direct cost of leaving AWS, and this is where that
+  # cost gets paid.
+  monitoring_enabled     = true
+  grafana_admin_password = var.grafana_admin_password
 }
 
 # ── The edge — identical on every cloud ──────────────────────────────────────

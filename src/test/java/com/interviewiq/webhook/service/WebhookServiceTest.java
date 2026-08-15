@@ -46,9 +46,11 @@ class WebhookServiceTest {
 
     @BeforeEach
     void setUp() {
+        // Real verifier, not a mock — these tests assert on signature rejection,
+        // and a mocked verifier would make them pass without verifying anything.
         webhookService = new WebhookService(
                 webhookEventRepository, walletService,
-                razorpayProps, objectMapper);
+                razorpayProps, objectMapper, new WebhookSignatureVerifier());
     }
 
     // =========================================================================
