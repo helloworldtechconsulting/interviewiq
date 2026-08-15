@@ -25,4 +25,7 @@ public interface CompanyRepository extends JpaRepository<Company, UUID> {
      * the same domain to mint another set of free interviews.
      */
     Optional<Company> findFirstByDomainIgnoreCaseAndPromoGrantAppliedAtIsNotNull(String domain);
+
+    /** Admin console header count (INTIQ-35). */
+    long countByStatus(CompanyStatus status);
 }

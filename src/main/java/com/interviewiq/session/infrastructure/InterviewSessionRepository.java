@@ -15,7 +15,6 @@ import org.springframework.data.repository.query.Param;
 import java.time.OffsetDateTime;
 import java.util.Collection;
 import java.util.List;
-import java.util.Collection;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -244,4 +243,30 @@ public interface InterviewSessionRepository extends JpaRepository<InterviewSessi
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT s FROM InterviewSession s WHERE s.id = :id")
     Optional<InterviewSession> findByIdForUpdate(@Param("id") UUID id);
+
+    // ── Platform-staff aggregates (INTIQ-35) ─────────────────────────────────
+    //
+    // Grouped counts for a page of companies, so the admin list costs one query
+    // per metric rather than one per row. A join against the company list would
+    // produce a row per session and aggregate it back down — fine at 20
+    // companies, quietly quadratic in interview history.
+
+    @Query("""
+           SELECT s.companyId, COUNT(s) FROM InterviewSession s
+           WHERE s.companyId IN :companyIds AND s.status = com.interviewiq.session.domain.SessionStatus.COMPLETED
+           GROUP BY s.companyId
+           """)
+    List<Object[]> countCompletedByCompanyIdIn(@Param("companyIds") Collection<UUID> companyIds);
+
+    @Query("""
+           SELECT s.companyId, COUNT(s) FROM InterviewSession s
+           WHERE s.companyId IN :companyIds AND s.status IN :statuses
+           GROUP BY s.companyId
+           """)
+    List<Object[]> countByCompanyIdInAndStatusIn(@Param("companyIds") Collection<UUID> companyIds,
+                                                 @Param("statuses") Collection<SessionStatus> statuses);
+
+    long countByStatus(SessionStatus status);
+
+    long countByStatusIn(Collection<SessionStatus> statuses);
 }

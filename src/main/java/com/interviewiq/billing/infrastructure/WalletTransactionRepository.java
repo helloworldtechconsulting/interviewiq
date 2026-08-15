@@ -13,6 +13,7 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -102,4 +103,27 @@ public interface WalletTransactionRepository extends JpaRepository<WalletTransac
              AND t.status = com.interviewiq.billing.domain.TransactionStatus.CONFIRMED
            """)
     OffsetDateTime earliestOutstandingGrantExpiry(@Param("companyId") UUID companyId);
+
+    // ── Platform-staff aggregates (INTIQ-35) ─────────────────────────────────
+
+    /**
+     * Lifetime spend per company, as {@code [companyId, sumPaise]}.
+     *
+     * <p>Summed over SETTLEMENT rather than TOPUP deliberately: a top-up is money
+     * received but not yet earned, whereas a settlement is an interview actually
+     * delivered. "What has this customer spent with us" is the second number.
+     */
+    @Query("""
+           SELECT t.companyId, COALESCE(SUM(t.amountPaise), 0) FROM WalletTransaction t
+           WHERE t.companyId IN :companyIds AND t.transactionType = :type
+           GROUP BY t.companyId
+           """)
+    List<Object[]> sumByCompanyIdInAndType(@Param("companyIds") Collection<UUID> companyIds,
+                                           @Param("type") TransactionType type);
+
+    @Query("""
+           SELECT COALESCE(SUM(t.amountPaise), 0) FROM WalletTransaction t
+           WHERE t.transactionType = :type
+           """)
+    long sumByType(@Param("type") TransactionType type);
 }

@@ -7,6 +7,8 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -43,4 +45,20 @@ public interface WalletRepository extends JpaRepository<Wallet, UUID> {
      */
     @Query("SELECT COALESCE(SUM(w.promoBalancePaise), 0) FROM Wallet w")
     long totalPromotionalExposurePaise();
+
+    /** Batch lookup for the admin company list (INTIQ-35) — one query per page, not per row. */
+    List<Wallet> findAllByCompanyIdIn(Collection<UUID> companyIds);
+
+    /**
+     * Total outstanding promotional credit across the platform.
+     *
+     * <p>A liability rather than a statistic: this is granted money not yet
+     * spent or expired, and the signup grant is capped against it (§7.8.3).
+     */
+    @Query("SELECT COALESCE(SUM(w.promoBalancePaise), 0) FROM Wallet w")
+    long sumPromoBalance();
+
+    /** Total held against in-flight interviews across the platform. */
+    @Query("SELECT COALESCE(SUM(w.reservedPaise), 0) FROM Wallet w")
+    long sumReserved();
 }

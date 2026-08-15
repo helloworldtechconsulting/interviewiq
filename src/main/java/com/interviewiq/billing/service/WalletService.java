@@ -303,6 +303,67 @@ public class WalletService {
                 companyId, razorpayOrderId, amountPaise, wallet.getBalancePaise());
     }
 
+    /**
+     * Adds paid balance by staff action, with a mandatory reason (INTIQ-35).
+     *
+     * <p><strong>Deliberately not the same thing as a promotional grant.</strong>
+     * Promotional credit expires, is spent before paid balance, and counts toward
+     * the platform's exposure cap. A manual credit is a <em>correction</em> — a
+     * refund for an interview that failed on our side, a goodwill gesture, a
+     * payment that arrived out of band — and behaves as money the customer paid,
+     * because that is what it is standing in for. Routing corrections through the
+     * promotional path would make them expire, which would be a second failure on
+     * top of the one being corrected.
+     *
+     * <p>This is the only path in the product where someone inside the company
+     * creates spendable balance in a customer's account. Three things follow from
+     * that, and all three are enforced rather than trusted:
+     *
+     * <ul>
+     *   <li>{@code PLATFORM_STAFF} only — enforced at the controller.</li>
+     *   <li>The reason is required and length-checked, so the ledger explains
+     *       itself without a separate investigation.</li>
+     *   <li>The acting staff user is recorded on the transaction, not only in the
+     *       audit log, so the row is self-contained.</li>
+     * </ul>
+     */
+    @Auditable(action = "MANUAL_CREDIT_APPLIED", entityType = "WALLET", entityIdArg = 0)
+    @Transactional
+    public WalletTransaction applyManualCredit(UUID companyId,
+                                               long amountPaise,
+                                               String reason,
+                                               UUID staffUserId) {
+        if (amountPaise <= 0) {
+            throw new ValidationException("A manual credit must be a positive amount.");
+        }
+        if (reason == null || reason.isBlank()) {
+            throw new ValidationException("A reason is required for every manual credit.");
+        }
+
+        Wallet wallet = lockWallet(companyId);
+        wallet.setBalancePaise(wallet.getBalancePaise() + amountPaise);
+        // Re-arm the low-balance warning, exactly as a top-up would — from the
+        // customer's point of view their balance has just gone up, and the
+        // reason it went up does not change when they should next be warned.
+        wallet.setLowBalanceNotifiedAt(null);
+        walletRepository.save(wallet);
+
+        WalletTransaction tx = buildTransaction(wallet, null, TransactionType.TOPUP,
+                amountPaise, wallet.getTotalBalancePaise());
+        tx.setDescription("Manual credit: " + reason.strip());
+        tx.setGrantReason(reason.strip());
+        tx.setGrantedByStaffId(staffUserId);
+        // No GST. A manual credit is a correction, not a sale — there is no
+        // taxable supply to charge tax on, and an invoice for it would be wrong.
+        tx.setGstPaise(0L);
+        txRepository.save(tx);
+
+        log.warn("Manual credit applied: companyId={} amountPaise={} staffUserId={} reason={}",
+                companyId, amountPaise, staffUserId, reason.strip());
+
+        return tx;
+    }
+
     // =========================================================================
     // Internal billing operations (used by SessionService)
     // =========================================================================

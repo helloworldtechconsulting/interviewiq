@@ -95,6 +95,15 @@ public class InvoiceService {
         if (tx.isPromotional()) {
             throw new ValidationException("Promotional credit is not a taxable supply and is not invoiced.");
         }
+        // A manual staff credit is stored as a TOPUP because it behaves like paid
+        // balance, but it is a correction rather than a sale — no money changed
+        // hands and there is no taxable supply. Without this guard it would pass
+        // the check above and produce a "tax invoice" for zero GST against a
+        // payment that never happened, which is a worse document than none.
+        if (tx.getGrantedByStaffId() != null) {
+            throw new ValidationException(
+                    "This was a manual account credit rather than a payment, so it is not invoiced.");
+        }
 
         Company company = companyRepository.findById(companyId)
                 .orElseThrow(() -> new ResourceNotFoundException("Company", companyId));
