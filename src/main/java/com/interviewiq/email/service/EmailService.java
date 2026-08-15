@@ -4,21 +4,17 @@ import com.interviewiq.auth.domain.OtpPurpose;
 import com.interviewiq.email.domain.EmailEvent;
 import com.interviewiq.email.domain.EmailStatus;
 import com.interviewiq.email.infrastructure.EmailEventRepository;
-import com.interviewiq.shared.config.AwsProperties;
+import com.interviewiq.shared.config.MailProperties;
+import jakarta.mail.internet.MimeMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import software.amazon.awssdk.services.ses.SesClient;
-import software.amazon.awssdk.services.ses.model.Body;
-import software.amazon.awssdk.services.ses.model.Content;
-import software.amazon.awssdk.services.ses.model.Destination;
-import software.amazon.awssdk.services.ses.model.Message;
-import software.amazon.awssdk.services.ses.model.SendEmailRequest;
-import software.amazon.awssdk.services.ses.model.SendEmailResponse;
-import software.amazon.awssdk.core.exception.SdkException;
-import software.amazon.awssdk.services.ses.model.SesException;
 
+import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.UUID;
@@ -31,7 +27,7 @@ import java.util.UUID;
  * the re-send endpoints to recover from transient SES errors.
  *
  * <p>All operations short-circuit to stub log output when
- * {@link AwsProperties#isUseLocalStub()} is {@code true}.
+ * {@link MailProperties#isUseLocalStub()} is {@code true}.
  */
 @Service
 public class EmailService {
@@ -64,15 +60,15 @@ public class EmailService {
             </body></html>
             """;
 
-    private final SesClient              sesClient;
-    private final AwsProperties          props;
+    private final JavaMailSender         mailSender;
+    private final MailProperties         mailProperties;
     private final EmailEventRepository   emailEventRepository;
 
-    public EmailService(SesClient sesClient,
-                        AwsProperties props,
+    public EmailService(JavaMailSender mailSender,
+                        MailProperties mailProperties,
                         EmailEventRepository emailEventRepository) {
-        this.sesClient           = sesClient;
-        this.props               = props;
+        this.mailSender           = mailSender;
+        this.mailProperties       = mailProperties;
         this.emailEventRepository = emailEventRepository;
     }
 
@@ -114,7 +110,7 @@ public class EmailService {
 
         // In local-stub mode the OTP is never emailed — log it so developers
         // can complete the verification flow without a real mail server.
-        if (props.isUseLocalStub()) {
+        if (mailProperties.isUseLocalStub()) {
             log.info("┌─────────────────────────────────────────────┐");
             log.info("│  [DEV] OTP CODE  →  {}  ({})  │", otp, purpose);
             log.info("│  Recipient: {}",  to);
@@ -146,13 +142,31 @@ public class EmailService {
     // Private helpers
     // =========================================================================
 
+    /**
+     * Sends one email over SMTP.
+     *
+     * <p>Moved off the SES SDK in v2.1 (PRD §9.2, Arch v4.0 §3). SES is
+     * AWS-specific, and the provider is now a configuration value — Resend,
+     * Brevo, Postmark or SES-over-SMTP all work through the same
+     * {@code JavaMailSender}.
+     *
+     * <p>The PRD is honest that this costs something: "portable SMTP providers
+     * cost more than SES for the same deliverability; that is a real, accepted
+     * cost of portability."
+     *
+     * <p>Optionally supports one attachment, which is what the booking
+     * confirmation's {@code .ics} needs (§7.4.1).
+     */
     private void send(String to, String subject, String htmlBody,
-                      String emailType, UUID companyId, UUID userId) {
+                      String emailType, UUID companyId, UUID userId,
+                      Attachment attachment) {
         String recipientLower = to.toLowerCase();
         EmailEvent event = buildEvent(recipientLower, emailType, companyId, userId);
 
-        if (props.isUseLocalStub()) {
-            log.info("[SES STUB] to={} subject={} body_chars={}", recipientLower, subject, htmlBody.length());
+        if (mailProperties.isUseLocalStub()) {
+            log.info("[SMTP STUB] to={} subject={} body_chars={} attachment={}",
+                    recipientLower, subject, htmlBody.length(),
+                    attachment == null ? "none" : attachment.filename());
             event.setStatus(EmailStatus.SENT);
             event.setProviderMessageId("stub-" + UUID.randomUUID());
             event.setSentAt(OffsetDateTime.now(ZoneOffset.UTC));
@@ -161,34 +175,47 @@ public class EmailService {
         }
 
         try {
-            SendEmailRequest request = SendEmailRequest.builder()
-                    .destination(Destination.builder().toAddresses(recipientLower).build())
-                    .message(Message.builder()
-                            .subject(Content.builder().data(subject).charset("UTF-8").build())
-                            .body(Body.builder()
-                                    .html(Content.builder().data(htmlBody).charset("UTF-8").build())
-                                    .build())
-                            .build())
-                    .source(props.getSesFromAddress())
-                    .build();
+            MimeMessage message = mailSender.createMimeMessage();
+            // multipart only when there is actually an attachment — a needless
+            // multipart wrapper hurts deliverability with some filters.
+            MimeMessageHelper helper = new MimeMessageHelper(
+                    message, attachment != null, StandardCharsets.UTF_8.name());
 
-            SendEmailResponse response = sesClient.sendEmail(request);
+            helper.setTo(recipientLower);
+            helper.setFrom(mailProperties.getFromAddress(), mailProperties.getFromName());
+            helper.setSubject(subject);
+            helper.setText(htmlBody, true);
+
+            if (attachment != null) {
+                helper.addAttachment(attachment.filename(),
+                        new ByteArrayResource(attachment.content()), attachment.contentType());
+            }
+
+            mailSender.send(message);
+
             event.setStatus(EmailStatus.SENT);
-            event.setProviderMessageId(response.messageId());
+            event.setProviderMessageId(message.getMessageID());
             event.setSentAt(OffsetDateTime.now(ZoneOffset.UTC));
-            log.debug("Email sent: to={} type={} messageId={}", recipientLower, emailType, response.messageId());
+            log.debug("Email sent: to={} type={}", recipientLower, emailType);
 
-        } catch (SesException e) {
-            log.warn("SES service error: to={} type={} error={}", recipientLower, emailType, e.getMessage());
-            event.setStatus(EmailStatus.FAILED);
-        } catch (SdkException e) {
-            log.warn("SES client error (check AWS credentials or set use-local-stub=true): " +
-                     "to={} type={} error={}", recipientLower, emailType, e.getMessage());
+        } catch (Exception e) {
+            // Never rethrown. A failed OTP email is recoverable — the user can
+            // request another — while an exception here would fail their
+            // registration outright. The FAILED row is what surfaces the problem.
+            log.warn("SMTP send failed: to={} type={} error={}", recipientLower, emailType, e.getMessage());
             event.setStatus(EmailStatus.FAILED);
         }
 
         emailEventRepository.save(event);
     }
+
+    private void send(String to, String subject, String htmlBody,
+                      String emailType, UUID companyId, UUID userId) {
+        send(to, subject, htmlBody, emailType, companyId, userId, null);
+    }
+
+    /** One email attachment — in practice the booking confirmation's .ics file. */
+    public record Attachment(String filename, String contentType, byte[] content) {}
 
     private EmailEvent buildEvent(String recipientEmail, String emailType,
                                    UUID companyId, UUID userId) {

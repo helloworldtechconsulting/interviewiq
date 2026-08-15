@@ -233,10 +233,15 @@
             <artifactId>s3</artifactId>
         </dependency>
 
-        <!-- ── AWS SDK v2: SES ────────────────────────────────── -->
+        <!-- ── Mail — SMTP via JavaMailSender ─────────────────── -->
+        <!--    Replaces the AWS SES SDK. PRD v2.1 §9.2 and Arch v4.0 §3 make the
+                email provider a configuration value — Resend, Brevo, Postmark or
+                SES-over-SMTP all speak SMTP. The PRD is candid that portable SMTP
+                costs more than SES for the same deliverability, and accepts that
+                as a real cost of portability.                                    -->
         <dependency>
-            <groupId>software.amazon.awssdk</groupId>
-            <artifactId>ses</artifactId>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-mail</artifactId>
         </dependency>
 
         <!-- Transcribe Streaming and Polly were removed with the March design:  -->
