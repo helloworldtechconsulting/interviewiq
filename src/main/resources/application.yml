@@ -156,8 +156,51 @@ app:
     s3-bucket: ""
     ses-from-address: noreply@interviewiq.ai
     use-local-stub: false
+  # ── Worker tuning (PRD v2.1 §7.9) ─────────────────────────────────────────
+  # Every polling worker claims with FOR UPDATE SKIP LOCKED and an explicit
+  # batch limit, so each pod takes a distinct set of rows.
+  worker:
+    stale-claim-after: PT5M          # a claim older than this is treated as abandoned
+    evaluation-batch-size: 10
+    question-generation-batch-size: 10
+    extraction-batch-size: 20
+    expiry-batch-size: 100
+    promo-expiry-batch-size: 100
+    trace-payload-sweep-batch-size: 500
+    evaluation-concurrency: 4        # LLM calls in flight per pod (§7.5.5)
+
+  # ── Scheduler enablement (Implementation Architecture Decisions §4) ────────
+  # One image, two Kubernetes Deployments distinguished by Spring profile.
+  # The `web` profile turns this off and serves REST + WebSocket; the `worker`
+  # profile turns it on and serves nothing. Default true so a single-process
+  # local run behaves like the whole system.
+  schedulers:
+    enabled: true
+
+  # ── Candidate-driven scheduling (PRD v2.1 §7.4) ───────────────────────────
+  # No business hours, no blackout periods, no quiet-hours setting: availability
+  # is genuinely 24×7 and capacity is the only constraint. `invite-buffer` is
+  # deliberately absent — it was deleted in v2.1 and replaced by the readiness
+  # gate (§7.4.3).
+  scheduling:
+    bucket-capacity: 25              # concurrent interviews per 5-minute bucket
+    booking-horizon: P30D
+    minimum-notice: PT5M
+    question-generation-sla: PT30M   # alarmed if breached; typical is ~20 seconds
+
   billing:
     session-cost-paise: 10000  # ₹100 per completed interview, flat across all duration tiers (PRD v2.1 §7.8.1)
+    minimum-top-up-paise: 10000      # ₹100 — was ₹500 before v2.1 (§7.8.1)
+    gst-percent: 18
+    low-balance-threshold-paise: 30000   # ₹300 banner + alert email
+    top-up-presets-paise: [10000, 50000, 100000, 250000, 500000, 1000000]
+    # Self-serve signup grant — ~3 free interviews, one per company (§7.8.3).
+    # "Nobody buys an AI interviewer they haven't watched run."
+    signup-grant:
+      enabled: true
+      amount-paise: 30000            # ₹300
+      valid-for: P60D
+      total-exposure-cap-paise: 5000000   # ₹50,000 platform-wide, monitored
     strand-cleanup:
       # One-off remediation for reservations stranded by the pre-fix SessionExpiryJob.
       # Keep false. Enable for exactly one deploy to drain stranded reservedPaise

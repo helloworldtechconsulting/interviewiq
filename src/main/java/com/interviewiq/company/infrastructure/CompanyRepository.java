@@ -16,4 +16,13 @@ public interface CompanyRepository extends JpaRepository<Company, UUID> {
     boolean existsBySlug(String slug);
 
     boolean existsByDomain(String domain);
+
+    /**
+     * Any company on this domain that already received a signup grant.
+     *
+     * <p>The domain-level abuse guard from §7.8.3: one grant per verified
+     * corporate domain, so a company cannot re-register under a second name on
+     * the same domain to mint another set of free interviews.
+     */
+    Optional<Company> findFirstByDomainIgnoreCaseAndPromoGrantAppliedAtIsNotNull(String domain);
 }

@@ -6,6 +6,7 @@ import com.interviewiq.billing.domain.Wallet;
 import com.interviewiq.billing.domain.WalletTransaction;
 import com.interviewiq.billing.infrastructure.WalletRepository;
 import com.interviewiq.billing.infrastructure.WalletTransactionRepository;
+import com.interviewiq.shared.config.BillingProperties;
 import com.interviewiq.shared.config.RazorpayProperties;
 import com.interviewiq.shared.exception.InsufficientBalanceException;
 import com.interviewiq.shared.exception.ResourceNotFoundException;
@@ -16,6 +17,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Optional;
@@ -39,6 +41,8 @@ class WalletServiceTest {
     @Mock WalletTransactionRepository txRepository;
     @Mock RazorpayClient razorpayClient;
     @Mock RazorpayProperties razorpayProps;
+
+    @Spy  BillingProperties billingProperties = new BillingProperties();
 
     @InjectMocks WalletService walletService;
 
@@ -65,7 +69,7 @@ class WalletServiceTest {
 
     @Test
     void reserveFunds_happyPath_incrementsReservedPaise() {
-        when(walletRepository.findByCompanyId(companyId)).thenReturn(Optional.of(wallet));
+        when(walletRepository.findByCompanyIdForUpdate(companyId)).thenReturn(Optional.of(wallet));
         when(txRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         WalletTransaction tx = walletService.reserveFunds(companyId, sessionId, 5_000L);
@@ -83,7 +87,7 @@ class WalletServiceTest {
     @Test
     void reserveFunds_throwsInsufficientBalance_whenAvailableFundsInsufficient() {
         wallet.setBalancePaise(3_000L);    // only ₹30 available
-        when(walletRepository.findByCompanyId(companyId)).thenReturn(Optional.of(wallet));
+        when(walletRepository.findByCompanyIdForUpdate(companyId)).thenReturn(Optional.of(wallet));
 
         assertThatThrownBy(() -> walletService.reserveFunds(companyId, sessionId, 5_000L))
                 .isInstanceOf(InsufficientBalanceException.class);
@@ -96,7 +100,7 @@ class WalletServiceTest {
     void reserveFunds_throwsInsufficientBalance_whenBalanceFullyReserved() {
         wallet.setBalancePaise(10_000L);
         wallet.setReservedPaise(8_000L);   // only ₹20 available
-        when(walletRepository.findByCompanyId(companyId)).thenReturn(Optional.of(wallet));
+        when(walletRepository.findByCompanyIdForUpdate(companyId)).thenReturn(Optional.of(wallet));
 
         assertThatThrownBy(() -> walletService.reserveFunds(companyId, sessionId, 5_000L))
                 .isInstanceOf(InsufficientBalanceException.class);
@@ -120,7 +124,7 @@ class WalletServiceTest {
         pending.setAmountPaise(5_000L);
         pending.setBalanceAfterPaise(10_000L);
 
-        when(walletRepository.findByCompanyId(companyId)).thenReturn(Optional.of(wallet));
+        when(walletRepository.findByCompanyIdForUpdate(companyId)).thenReturn(Optional.of(wallet));
         when(txRepository.findByWalletIdAndSessionIdAndTransactionTypeAndStatus(
                 wallet.getId(), sessionId, TransactionType.RESERVATION, TransactionStatus.PENDING))
                 .thenReturn(Optional.of(pending));
@@ -139,7 +143,7 @@ class WalletServiceTest {
         wallet.setBalancePaise(2_000L);
         wallet.setReservedPaise(5_000L);
 
-        when(walletRepository.findByCompanyId(companyId)).thenReturn(Optional.of(wallet));
+        when(walletRepository.findByCompanyIdForUpdate(companyId)).thenReturn(Optional.of(wallet));
         when(txRepository.findByWalletIdAndSessionIdAndTransactionTypeAndStatus(any(), any(), any(), any()))
                 .thenReturn(Optional.empty());
         when(txRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -166,7 +170,7 @@ class WalletServiceTest {
         pending.setTransactionType(TransactionType.RESERVATION);
         pending.setStatus(TransactionStatus.PENDING);
 
-        when(walletRepository.findByCompanyId(companyId)).thenReturn(Optional.of(wallet));
+        when(walletRepository.findByCompanyIdForUpdate(companyId)).thenReturn(Optional.of(wallet));
         when(txRepository.findByWalletIdAndSessionIdAndTransactionTypeAndStatus(
                 wallet.getId(), sessionId, TransactionType.RESERVATION, TransactionStatus.PENDING))
                 .thenReturn(Optional.of(pending));
@@ -186,7 +190,7 @@ class WalletServiceTest {
 
     @Test
     void releaseFunds_isNoOp_whenNoPendingReservation() {
-        when(walletRepository.findByCompanyId(companyId)).thenReturn(Optional.of(wallet));
+        when(walletRepository.findByCompanyIdForUpdate(companyId)).thenReturn(Optional.of(wallet));
         when(txRepository.findByWalletIdAndSessionIdAndTransactionTypeAndStatus(any(), any(), any(), any()))
                 .thenReturn(Optional.empty());
 
@@ -202,7 +206,7 @@ class WalletServiceTest {
     @Test
     void confirmTopUp_creditsWallet_onFirstCall() {
         String orderId = "order_test_001";
-        when(walletRepository.findByCompanyId(companyId)).thenReturn(Optional.of(wallet));
+        when(walletRepository.findByCompanyIdForUpdate(companyId)).thenReturn(Optional.of(wallet));
         when(txRepository.findByRazorpayOrderId(orderId)).thenReturn(Optional.empty());
         when(txRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
@@ -221,7 +225,7 @@ class WalletServiceTest {
         walletService.confirmTopUp(orderId, 20_000L, companyId);
 
         // No wallet lookup, no save — pure no-op
-        verify(walletRepository, never()).findByCompanyId(any());
+        verify(walletRepository, never()).findByCompanyIdForUpdate(any());
         verify(walletRepository, never()).save(any());
     }
 
