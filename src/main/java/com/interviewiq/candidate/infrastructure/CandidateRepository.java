@@ -26,6 +26,33 @@ public interface CandidateRepository extends JpaRepository<Candidate, UUID> {
 
     boolean existsByJobOpeningIdAndEmail(UUID jobOpeningId, String email);
 
+    /**
+     * Candidate listing with optional job, résumé-status and free-text filters,
+     * evaluated in the database.
+     *
+     * <p>Same defect as the job list: the page previously searched only the rows
+     * it had already fetched, so a candidate on page two was invisible to a search
+     * that should have found them. On a bulk import of 200 candidates that is the
+     * normal case rather than an edge case.
+     *
+     * <p>{@code search} matches name or email; all three parameters are nullable.
+     */
+    @Query("""
+           SELECT c FROM Candidate c
+           WHERE c.companyId = :companyId
+             AND (:jobOpeningId IS NULL OR c.jobOpeningId = :jobOpeningId)
+             AND (:status IS NULL OR c.resumeExtractionStatus = :status)
+             AND (:search IS NULL
+                  OR LOWER(c.fullName) LIKE CONCAT('%', :search, '%')
+                  OR LOWER(c.email)    LIKE CONCAT('%', :search, '%'))
+           ORDER BY c.createdAt DESC
+           """)
+    Page<Candidate> search(@Param("companyId") UUID companyId,
+                           @Param("jobOpeningId") UUID jobOpeningId,
+                           @Param("status") PipelineStatus status,
+                           @Param("search") String search,
+                           Pageable pageable);
+
     /** Candidates with a resume uploaded but text extraction not yet started — for ResumeExtractionWorker. */
     List<Candidate> findAllByResumeExtractionStatusAndResumeS3KeyIsNotNull(PipelineStatus status);
 

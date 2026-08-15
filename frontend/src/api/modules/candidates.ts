@@ -10,8 +10,16 @@ import type {
 const BASE = "/api/v1/candidates";
 
 export const candidatesApi = {
+  /**
+   * All filters are applied server-side. `search` matches name or email across
+   * the whole company, not just the page currently loaded — filtering in the
+   * browser silently hid anyone past the first page, which on a 200-candidate
+   * bulk import is most of them.
+   */
   list: (params?: {
     jobOpeningId?: string;   // optional — omit for company-wide listing
+    resumeStatus?: string;   // PENDING | IN_PROGRESS | DONE | FAILED
+    search?: string;
     page?: number;
     size?: number;
   }) => apiClient.get<Page<Candidate>>(BASE, { params }).then((r) => r.data),

@@ -12,7 +12,9 @@ import com.interviewiq.shared.domain.PipelineStatus;
 import com.interviewiq.shared.exception.ResourceNotFoundException;
 import com.interviewiq.shared.exception.ValidationException;
 import com.interviewiq.shared.security.SecurityContext;
+import com.interviewiq.storage.domain.StorageObjectType;
 import com.interviewiq.storage.domain.UploadKind;
+import com.interviewiq.storage.service.StorageObjectRecorder;
 import com.interviewiq.storage.service.StorageService;
 import com.interviewiq.storage.service.UploadKeyService;
 import org.slf4j.Logger;
@@ -47,16 +49,19 @@ public class JobService {
     /** JD upload URL valid for 15 minutes. */
     private static final Duration JD_UPLOAD_EXPIRY = Duration.ofMinutes(15);
 
-    private final JobOpeningRepository jobOpeningRepository;
-    private final StorageService       storageService;
-    private final UploadKeyService     uploadKeyService;
+    private final JobOpeningRepository   jobOpeningRepository;
+    private final StorageService         storageService;
+    private final UploadKeyService       uploadKeyService;
+    private final StorageObjectRecorder  storageObjectRecorder;
 
     public JobService(JobOpeningRepository jobOpeningRepository,
                       StorageService storageService,
-                      UploadKeyService uploadKeyService) {
-        this.jobOpeningRepository = jobOpeningRepository;
-        this.storageService       = storageService;
-        this.uploadKeyService     = uploadKeyService;
+                      UploadKeyService uploadKeyService,
+                      StorageObjectRecorder storageObjectRecorder) {
+        this.jobOpeningRepository  = jobOpeningRepository;
+        this.storageService        = storageService;
+        this.uploadKeyService      = uploadKeyService;
+        this.storageObjectRecorder = storageObjectRecorder;
     }
 
     // =========================================================================
@@ -85,6 +90,31 @@ public class JobService {
 
         log.info("Job created: companyId={} jobId={} title={}", companyId, job.getId(), job.getTitle());
         return JobResponse.from(job);
+    }
+
+    /**
+     * Lists the caller's job openings, optionally narrowed by status and a
+     * free-text match on title or department.
+     *
+     * <p>Both filters are applied by the database. A blank search string is
+     * normalised to {@code null} rather than passed through as {@code ""}, because
+     * {@code LIKE '%%'} matches every row including those with a null department —
+     * accidentally correct here, but only by luck, and not something to rely on.
+     */
+    @Transactional(readOnly = true)
+    public Page<JobResponse> list(JobStatus status, String search, Pageable pageable) {
+        UUID companyId = SecurityContext.requireCompanyId();
+        return jobOpeningRepository
+                .search(companyId, status, normaliseSearch(search), pageable)
+                .map(JobResponse::from);
+    }
+
+    /** Lowercases and trims a search term, or returns null when there is nothing to match. */
+    private static String normaliseSearch(String search) {
+        if (search == null || search.isBlank()) {
+            return null;
+        }
+        return search.strip().toLowerCase();
     }
 
     @Transactional(readOnly = true)
@@ -158,7 +188,10 @@ public class JobService {
         JobOpening job = requireJob(jobId);
         String ownedKey = uploadKeyService.validateOwnedKey(
                 UploadKind.JOB_DESCRIPTION, job.getCompanyId(), jobId, objectKey);
-        storageService.verifyUploadedObject(ownedKey, UploadKind.JOB_DESCRIPTION);
+        StorageService.VerifiedObject verified =
+                storageService.verifyUploadedObject(ownedKey, UploadKind.JOB_DESCRIPTION);
+        storageObjectRecorder.record(
+                job.getCompanyId(), jobId, StorageObjectType.JOB_DESCRIPTION, ownedKey, verified);
 
         job.setJdS3Key(ownedKey);
         job.setJdExtractionStatus(PipelineStatus.PENDING);

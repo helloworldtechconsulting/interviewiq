@@ -2,7 +2,7 @@
 // CandidatesPage.tsx — All candidates with job filter + add candidate dialog
 // =============================================================================
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
@@ -252,29 +252,40 @@ export function CandidatesPage() {
 
   const queryJobOpeningId = jobIdFilter === "ALL" ? undefined : jobIdFilter;
 
+  // Debounced so typing does not fire a request per keystroke. 300ms is short
+  // enough to feel immediate and long enough that a normal typing burst is one
+  // query rather than eight.
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  // A new search term has to reset paging: staying on page 3 of the old result
+  // set shows an empty page for a term that does have matches.
+  useEffect(() => {
+    setPage(0);
+  }, [debouncedSearch, jobIdFilter]);
+
   const { data, isLoading } = useQuery({
     queryKey: queryKeys.candidates.list({
       page,
       jobOpeningId: queryJobOpeningId,
+      search: debouncedSearch || undefined,
     }),
     queryFn: () =>
       candidatesApi.list({
         page,
         size: PAGE_SIZE,
         jobOpeningId: queryJobOpeningId,
+        search: debouncedSearch || undefined,
       }),
+    placeholderData: (previous) => previous,
   });
 
-  const candidates = data?.content ?? [];
+  // The server has already applied the filter — the list is used as returned.
+  const filtered = data?.content ?? [];
   const totalPages = data?.totalPages ?? 0;
-
-  const filtered = search.trim()
-    ? candidates.filter(
-        (c) =>
-          c.fullName.toLowerCase().includes(search.toLowerCase()) ||
-          c.email.toLowerCase().includes(search.toLowerCase()),
-      )
-    : candidates;
 
   return (
     <div className="space-y-6">

@@ -140,15 +140,20 @@ public class StorageService {
      *
      * <p>Skipped in stub mode, where no object exists to inspect.
      *
+     * <p>Returns what the object actually is, not what the client said it was.
+     * Callers persist these values rather than the request payload's — the whole
+     * point of the check is that the client's claims are not authoritative.
+     *
      * @param objectKey the key the client has just uploaded to
      * @param kind      the upload class whose limits apply
+     * @return the verified size and content type as reported by the bucket
      * @throws ValidationException if the object is missing, too large, or of a
      *                             content type outside the allow-list
      */
-    public void verifyUploadedObject(String objectKey, UploadKind kind) {
+    public VerifiedObject verifyUploadedObject(String objectKey, UploadKind kind) {
         if (props.isUseLocalStub()) {
             log.info("[STORAGE STUB] verifyUploadedObject key={} kind={}", objectKey, kind);
-            return;
+            return VerifiedObject.stub();
         }
 
         HeadObjectResponse head;
@@ -179,6 +184,21 @@ public class StorageService {
             throw new ValidationException(
                     "Unsupported file type '" + UploadKind.normaliseContentType(head.contentType())
                             + "'. Allowed: " + String.join(", ", kind.getAllowedContentTypes()) + ".");
+        }
+        return new VerifiedObject(size, UploadKind.normaliseContentType(head.contentType()));
+    }
+
+    /**
+     * What a verified object turned out to be, read back from the bucket.
+     *
+     * <p>In stub mode there is no object to inspect, so the size is zero and the
+     * content type null. Persisting those is correct — a stubbed upload genuinely
+     * has no verified size, and recording a fabricated one would make local rows
+     * indistinguishable from real ones.
+     */
+    public record VerifiedObject(long sizeBytes, String contentType) {
+        static VerifiedObject stub() {
+            return new VerifiedObject(0L, null);
         }
     }
 
