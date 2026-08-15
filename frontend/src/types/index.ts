@@ -333,10 +333,6 @@ export interface CreateSessionRequest {
   scheduledAt: string;   // ISO-8601 UTC timestamp — must be a future time
 }
 
-export interface SetMeetUrlRequest {
-  meetUrl: string;
-}
-
 export interface ProctoringFlag {
   type: SessionEventType;
   count?: number;
@@ -439,7 +435,6 @@ export interface CandidateSession {
   jobTitle: string;
   companyName: string;
   scheduledAt: string | null;
-  meetUrl: string | null;
   status: SessionStatus;
 }
 
