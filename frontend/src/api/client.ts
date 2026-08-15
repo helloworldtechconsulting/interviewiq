@@ -148,9 +148,13 @@ function processQueue(error: unknown, token: string | null) {
 // ── Employer API client ───────────────────────────────────────────────────────
 
 export const apiClient = axios.create({
+  // Required for the HTTP-only refresh cookie to travel with API calls. The SPA
+  // is served from app.* and calls api.*, which is cross-site for cookie
+  // purposes — and this is also why the server's CORS policy must enumerate
+  // origins rather than use a wildcard (PRD v2.1 §7.1.3).
+  withCredentials: true,
   baseURL: BASE_URL,
   headers: { "Content-Type": "application/json" },
-  withCredentials: false,
 });
 
 // Request interceptor — attach Bearer token + convert body to snake_case
@@ -225,24 +229,27 @@ apiClient.interceptors.response.use(
     isRefreshing = true;
 
     try {
-      const refreshToken = authStore.getState().refreshToken;
-      if (!refreshToken) throw new AppError(401, "NO_REFRESH_TOKEN", "Please log in again");
-
       // Company slug must match the backend route: POST /api/v1/{slug}/auth/refresh
       const slug = import.meta.env.VITE_COMPANY_SLUG ?? "interviewiq-dev";
 
-      // Use raw axios (not apiClient) to avoid interceptor loops.
-      // Backend expects snake_case: { refresh_token: "..." }
+      // Raw axios (not apiClient) to avoid interceptor loops.
+      //
+      // No body: the refresh token travels in the HTTP-only `iiq_refresh`
+      // cookie, which this code cannot read (PRD v2.1 §7.1.1). withCredentials
+      // is what makes the browser attach it on a cross-site request — the SPA is
+      // on app.* and the API on api.*, and without it the cookie is silently
+      // omitted and every session ends at the 60-minute mark.
       const res = await axios.post<{
         success: boolean;
-        data: { access_token: string; refresh_token: string };
+        data: { accessToken: string };
       }>(
         `${BASE_URL}/api/v1/${slug}/auth/refresh`,
-        { refresh_token: refreshToken },
+        {},
+        { withCredentials: true },
       );
 
-      const { access_token: accessToken, refresh_token: newRefreshToken } = res.data.data;
-      authStore.getState().setTokens(accessToken, newRefreshToken);
+      const accessToken = res.data.data.accessToken;
+      authStore.getState().setAccessToken(accessToken);
 
       // Replay all queued requests with the new token
       processQueue(null, accessToken);
@@ -261,7 +268,7 @@ apiClient.interceptors.response.use(
     } catch (refreshError) {
       processQueue(refreshError, null);
       // Refresh failed — wipe local auth state and redirect to login
-      authStore.getState().logout();
+      authStore.getState().clearSession();
       window.location.href = "/login";
       return Promise.reject(toAppError(refreshError));
     } finally {
@@ -277,7 +284,6 @@ apiClient.interceptors.response.use(
 export const candidateClient = axios.create({
   baseURL: BASE_URL,
   headers: { "Content-Type": "application/json" },
-  withCredentials: false,
 });
 
 candidateClient.interceptors.request.use(

@@ -1,20 +1,32 @@
 // =============================================================================
 // stores/authStore.ts — Authentication state (Zustand)
 //
-// Security model:
-//   • accessToken  — kept in Zustand memory ONLY (never localStorage/sessionStorage)
-//                    XSS cannot steal it because it's not in the DOM
-//   • refreshToken — stored in localStorage (key: iq_refresh_token)
-//                    survives page refresh; needed to restore session
+// SECURITY MODEL (PRD v2.1 §7.1.1, §17)
 //
-// On page load (main.tsx) we call authStore.getState().hydrateFromStorage()
-// to restore the refresh token and exchange it for a new access token.
+//   • accessToken   — Zustand memory ONLY. Never localStorage, never
+//                     sessionStorage, never a cookie readable by script. It is
+//                     short-lived (60 minutes) and has to be readable here to be
+//                     attached as a bearer header.
+//
+//   • refreshToken  — NOT HELD BY THIS APPLICATION AT ALL. It lives in the
+//                     HTTP-only `iiq_refresh` cookie, which the browser attaches
+//                     to /api requests automatically and which JavaScript cannot
+//                     read. There is deliberately no field for it below.
+//
+// This is a change from the previous design, which kept the refresh token in
+// localStorage under `iq_refresh_token`. The PRD states the requirement in bold
+// — "the refresh token must never be stored in localStorage" — and the risk
+// register explains why: one XSS payload turns a 7-day refresh token into a week
+// of access from the attacker's own machine, where a stolen 60-minute access
+// token is a far smaller window.
+//
+// On page load, AuthProvider calls the refresh endpoint. If the cookie is
+// present and valid the server returns a new access token; if not, the user is
+// simply logged out. The client never needs to know which.
 // =============================================================================
 
 import { create } from "zustand";
 import type { JwtPayload, UserRole } from "@/types";
-
-const REFRESH_TOKEN_KEY = "iq_refresh_token";
 
 // Decode JWT payload without any library (base64url → JSON)
 function decodeJwt(token: string): JwtPayload | null {
@@ -41,14 +53,13 @@ interface AuthUser {
 interface AuthState {
   // State
   accessToken: string | null;
-  refreshToken: string | null;
   user: AuthUser | null;
-  isHydrated: boolean;   // true once hydrateFromStorage() has run
+  /** True once AuthProvider has attempted a silent refresh, successful or not. */
+  isHydrated: boolean;
 
   // Actions
-  setTokens: (accessToken: string, refreshToken: string) => void;
-  logout: () => void;
-  hydrateFromStorage: () => void;
+  setAccessToken: (accessToken: string) => void;
+  clearSession: () => void;
   setHydrated: () => void;
 }
 
@@ -56,51 +67,37 @@ interface AuthState {
 
 export const authStore = create<AuthState>((set) => ({
   accessToken: null,
-  refreshToken: null,
   user: null,
   isHydrated: false,
 
-  setTokens(accessToken, refreshToken) {
-    // Persist refresh token to localStorage
-    try {
-      localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
-    } catch {
-      // localStorage may be unavailable in private mode — not fatal
-    }
-
-    // Decode user info from access token payload (no extra API call)
+  /**
+   * Records a new access token. There is no refresh-token parameter by design:
+   * the server sets it as an HTTP-only cookie and this code never sees it.
+   */
+  setAccessToken(accessToken) {
+    // Decode user info from the access token payload — no extra API call.
     const payload = decodeJwt(accessToken);
     const user: AuthUser | null = payload
       ? {
           id: payload.sub,
           email: payload.email,
           role: payload.role,
-          companyId: payload.cid,   // JWT uses "cid" claim (see TokenService.java)
+          companyId: payload.cid, // JWT uses the "cid" claim (see TokenService.java)
         }
       : null;
 
-    set({ accessToken, refreshToken, user });
+    set({ accessToken, user });
   },
 
-  logout() {
-    try {
-      localStorage.removeItem(REFRESH_TOKEN_KEY);
-    } catch {
-      // ignore
-    }
-    set({ accessToken: null, refreshToken: null, user: null });
-  },
-
-  hydrateFromStorage() {
-    let refreshToken: string | null = null;
-    try {
-      refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
-    } catch {
-      // ignore
-    }
-    // Do NOT set isHydrated here — AuthProvider completes hydration
-    // after attempting to exchange the refresh token for an access token.
-    set({ refreshToken });
+  /**
+   * Clears local session state.
+   *
+   * <p>Does NOT clear the refresh cookie — it cannot, because the cookie is
+   * HTTP-only. The logout endpoint revokes it server-side and sends a clearing
+   * Set-Cookie, so callers must hit that endpoint rather than relying on this.
+   */
+  clearSession() {
+    set({ accessToken: null, user: null });
   },
 
   setHydrated() {

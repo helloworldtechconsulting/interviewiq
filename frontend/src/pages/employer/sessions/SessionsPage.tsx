@@ -30,7 +30,12 @@ const PAGE_SIZE = 10;
 const STATUS_OPTIONS: { label: string; value: string }[] = [
   { label: "All statuses", value: "ALL" },
   { label: "Invited", value: "INVITED" },
-  { label: "In Progress", value: "STARTED" },
+  { label: "Scheduled", value: "SCHEDULED" },
+  { label: "In Progress", value: "IN_PROGRESS" },
+  // EVALUATING is filterable on purpose. PRD v2.1 §7.4.4: recruiters run hiring
+  // drives and need to know which reports are still pending, so the state must
+  // not be hidden behind a spinner on the report page.
+  { label: "Evaluating", value: "EVALUATING" },
   { label: "Completed", value: "COMPLETED" },
   { label: "Cancelled", value: "CANCELLED" },
   { label: "Expired", value: "EXPIRED" },

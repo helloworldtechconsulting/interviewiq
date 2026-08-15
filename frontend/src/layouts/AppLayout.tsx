@@ -53,7 +53,7 @@ export function AppLayout() {
     } catch {
       // Best-effort logout — always clear local state
     }
-    authStore.getState().logout();
+    authStore.getState().clearSession();
     queryClient.clear();
     navigate("/login", { replace: true });
   }

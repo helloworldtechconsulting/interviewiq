@@ -39,16 +39,71 @@ export type EmploymentType = "FULL_TIME" | "PART_TIME" | "CONTRACT" | "INTERNSHI
 
 export type PipelineStatus = "PENDING" | "IN_PROGRESS" | "DONE" | "FAILED";
 
+/**
+ * Interview session lifecycle (PRD v2.1 §7.4.4).
+ *
+ * SCHEDULED and EVALUATING are new in v2.1, and STARTED is renamed IN_PROGRESS.
+ *
+ * EVALUATING is user-visible on purpose: the PRD is explicit that it must not be
+ * hidden behind a spinner, because recruiters running hiring drives need to see
+ * which reports are still pending.
+ */
 export type SessionStatus =
-  | "INVITED"
-  | "STARTED"
-  | "COMPLETED"
+  | "INVITED"       // link sent, not yet scheduled
+  | "SCHEDULED"     // candidate picked a time; capacity buckets held
+  | "IN_PROGRESS"   // candidate is in the interview room
+  | "EVALUATING"    // interview finished, scoring running
+  | "COMPLETED"     // report ready
   | "CANCELLED"
   | "EXPIRED"
   | "ERROR";
 
+/**
+ * Per-job interview length (PRD v2.1 §7.2.1). All four cost Rs.100 flat — the
+ * tier is a product-fit decision, not a monetisation lever.
+ */
+export type DurationTier = "QUICK" | "STANDARD" | "IN_DEPTH" | "COMPREHENSIVE";
+
+export const DURATION_TIERS: Record<
+  DurationTier,
+  { label: string; minutes: number; questions: number; description: string }
+> = {
+  QUICK: {
+    label: "Quick screen",
+    minutes: 20,
+    questions: 8,
+    description: "High-volume funnels, fresher roles, first-pass filtering",
+  },
+  STANDARD: {
+    label: "Standard",
+    minutes: 35,
+    questions: 15,
+    description: "The general-purpose first-round screen",
+  },
+  IN_DEPTH: {
+    label: "In-depth",
+    minutes: 45,
+    questions: 20,
+    description: "Mid-senior individual contributors, specialist roles",
+  },
+  COMPREHENSIVE: {
+    label: "Comprehensive",
+    minutes: 60,
+    questions: 26,
+    description: "Senior and lead roles where the screen replaces a technical call",
+  },
+};
+
+/** Where a question came from (PRD v2.1 §7.5.8). Shown on the report. */
+export type QuestionSource = "AI" | "EMPLOYER";
+
+/** Safety-filter outcome on an employer-supplied question (PRD v2.1 §7.5.8). */
+export type QuestionSafetyStatus = "PENDING" | "APPROVED" | "REJECTED";
+
 export type TransactionType =
-  | "TOPUP"
+  | "TOPUP"          // paid, invoiced, GST-bearing
+  | "PROMO_CREDIT"   // free credit — never invoiced (PRD v2.1 §7.8.3)
+  | "PROMO_EXPIRY"   // reversing entry when unspent promo credit lapses
   | "RESERVATION"
   | "SETTLEMENT"
   | "RELEASE"
@@ -115,12 +170,10 @@ export interface UserResponse {
 
 export interface AuthResponse {
   accessToken: string;
-  refreshToken: string;
   user: UserResponse;
 }
 
 export interface RefreshRequest {
-  refreshToken: string;
 }
 
 export interface VerifyOtpRequest {
@@ -384,12 +437,32 @@ export interface Evaluation {
 
 // ── Billing / Wallet ──────────────────────────────────────────────────────────
 
+/**
+ * Wallet balance, split into paid and promotional (PRD v2.1 §7.7, §7.8.3).
+ *
+ * The split is surfaced rather than summed because "a customer must never be
+ * surprised about which money is being spent". Promotional credit is always
+ * spent first, so a company on a free trial watches promoBalancePaise fall while
+ * paidBalancePaise stays untouched — which is only reassuring if they can see
+ * both numbers.
+ */
 export interface Wallet {
   id: string;
   companyId: string;
-  balancePaise: number;      // total balance in paise
-  reservedPaise: number;     // funds ring-fenced for active sessions
-  availablePaise: number;    // balancePaise − reservedPaise
+  /** Money the company bought. GST invoices are drawn against this alone. */
+  paidBalancePaise: number;
+  /** Free credit — spent first, never invoiced. */
+  promoBalancePaise: number;
+  /** paid + promotional. What the low-balance threshold is measured against. */
+  totalBalancePaise: number;
+  /** Ring-fenced for invited sessions and in-flight imports. */
+  reservedPaise: number;
+  /** total − reserved. What a new session can draw on. */
+  availablePaise: number;
+  /** Earliest expiry among outstanding grants, or null if none lapse. */
+  promoExpiresAt: string | null;
+  /** Whether the persistent low-balance banner should show (Rs.300 or below). */
+  lowBalance: boolean;
 }
 
 export interface WalletTransaction {

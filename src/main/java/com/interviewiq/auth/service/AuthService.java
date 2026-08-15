@@ -122,7 +122,7 @@ public class AuthService {
      * a full token pair so the user is immediately logged in.
      */
     @Transactional
-    public AuthResponse verifyEmail(String slug, VerifyEmailRequest request) {
+    public AuthResponse.WithRefreshToken verifyEmail(String slug, VerifyEmailRequest request) {
         Company company = requireCompanyBySlug(slug);
         String email = request.email().toLowerCase();
 
@@ -186,7 +186,7 @@ public class AuthService {
      * @throws AuthorizationException for any credential failure (no user enumeration)
      */
     @Transactional
-    public AuthResponse login(String slug, LoginRequest request, String clientIp) {
+    public AuthResponse.WithRefreshToken login(String slug, LoginRequest request, String clientIp) {
         loginAttemptService.checkLockout(clientIp);
 
         Company company = requireCompanyBySlug(slug);
@@ -216,7 +216,7 @@ public class AuthService {
      * issues a new token pair.
      */
     @Transactional
-    public AuthResponse refresh(RefreshRequest request) {
+    public AuthResponse.WithRefreshToken refresh(RefreshRequest request) {
         String hash = tokenService.hashToken(request.refreshToken());
 
         RefreshToken stored = refreshTokenRepository.findByTokenHash(hash)
@@ -308,7 +308,16 @@ public class AuthService {
      * Generates a new RS256 access token and a rotating refresh token, persists
      * the refresh token hash, and returns both in an {@link AuthResponse}.
      */
-    private AuthResponse issueTokenPair(User user) {
+    /**
+     * Generates a new RS256 access token and a rotating refresh token, persists
+     * the refresh token hash, and returns both.
+     *
+     * <p>The refresh token comes back separately from the {@link AuthResponse}
+     * rather than inside it, because the controller must place it in an
+     * HTTP-only cookie and the response body must not carry it (PRD v2.1 §7.1.1).
+     * Splitting them here means no caller can accidentally serialise it.
+     */
+    private AuthResponse.WithRefreshToken issueTokenPair(User user) {
         String accessToken  = tokenService.generateAccessToken(user);
         String rawRefresh   = tokenService.generateRefreshToken();
 
@@ -319,6 +328,7 @@ public class AuthService {
                 .plus(securityProperties.getJwt().getRefreshTokenExpiration()));
         refreshTokenRepository.save(rt);
 
-        return new AuthResponse(accessToken, rawRefresh, UserResponse.from(user));
+        return new AuthResponse.WithRefreshToken(
+                new AuthResponse(accessToken, UserResponse.from(user)), rawRefresh);
     }
 }

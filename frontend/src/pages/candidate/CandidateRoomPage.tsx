@@ -414,7 +414,7 @@ export function CandidateRoomPage() {
       return;
     }
 
-    if (initData.status === "STARTED") {
+    if (initData.status === "IN_PROGRESS") {
       requestCameraAndMic().then((ok) => {
         if (ok) {
           dispatch({ type: "SET_PHASE", phase: "SPEAKING" });

@@ -3,12 +3,10 @@
 // =============================================================================
 
 import { apiClient } from "@/api/client";
-import { authStore } from "@/stores/authStore";
 import type {
   AuthResponse,
   ForgotPasswordRequest,
   LoginRequest,
-  RefreshRequest,
   RegisterRequest,
   ResendVerificationRequest,
   ResetPasswordRequest,
@@ -31,10 +29,6 @@ export const authApi = {
       .post<AuthResponse>(`${base(slug)}/login`, data)
       .then((r) => r.data),
 
-  refresh: (data: RefreshRequest, slug?: string) =>
-    apiClient
-      .post<AuthResponse>(`${base(slug)}/refresh`, data)
-      .then((r) => r.data),
 
   verifyEmail: (data: VerifyOtpRequest, slug?: string) =>
     apiClient
@@ -56,12 +50,23 @@ export const authApi = {
       .post(`${base(slug)}/reset-password`, data)
       .then(() => undefined),
 
-  logout: () => {
-    const refreshToken = authStore.getState().refreshToken ?? "";
-    return apiClient
-      .post(`${base()}/logout`, { refreshToken })
-      .then(() => undefined);
-  },
+  /**
+   * Revokes the session server-side and clears the refresh cookie.
+   *
+   * <p>No token is sent: the server reads the HTTP-only cookie. Calling this is
+   * the ONLY way to clear it — clearSession() in the store cannot, because
+   * script has no access to an HttpOnly cookie by design.
+   */
+  logout: () =>
+    apiClient.post(`${base()}/logout`).then(() => undefined),
+
+  /**
+   * Exchanges the refresh cookie for a new access token.
+   *
+   * <p>Takes no argument for the same reason: the browser attaches the cookie.
+   */
+  refresh: () =>
+    apiClient.post<AuthResponse>(`${base()}/refresh`).then((r) => r.data),
 
   googleLogin: (idToken: string, slug?: string) =>
     apiClient
