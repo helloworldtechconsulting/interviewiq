@@ -60,4 +60,12 @@ public interface CandidateRepository extends JpaRepository<Candidate, UUID> {
            """, nativeQuery = true)
     List<Candidate> claimForResumeExtraction(@Param("batchSize") int batchSize,
                                              @Param("staleBefore") OffsetDateTime staleBefore);
+
+    /**
+     * Emails already on an opening, for duplicate detection during a bulk import
+     * (PRD v2.1 §7.3.1). Projected rather than loading entities: a 200-candidate
+     * opening is 200 rows of which only one column matters.
+     */
+    @Query("SELECT c.email FROM Candidate c WHERE c.jobOpeningId = :jobOpeningId")
+    List<String> findAllEmailsByJobOpeningId(@Param("jobOpeningId") UUID jobOpeningId);
 }
