@@ -35,6 +35,12 @@
 
         <!-- JaCoCo — code coverage (0.8.12 supports Java 21) -->
         <jacoco.version>0.8.12</jacoco.version>
+
+        <!-- Coverage kill switch: `mvn clean install -DskipTests -DskipCoverage`
+             turns off the agent, the report, and the verify-phase gate together.
+             (JaCoCo's own -Djacoco.skip=true does the same; this is the alias
+             the team already types.) -->
+        <skipCoverage>false</skipCoverage>
         <gatling.version>3.11.5</gatling.version>
 
         <!-- Newer Testcontainers than Spring Boot 3.3.6 manages (1.19.8), pulling a
@@ -169,14 +175,36 @@
         <!--    Both starters are present because PRD v2.1 §9.1 makes vendor a
                 per-workflow configuration value, not a build-time choice. The
                 evaluation vendor is "undecided by design": §13.1 calls for
-                shadow-running GPT-5.4-mini against Claude Haiku 4.5 over the
-                first ~50 interviews and selecting on measured score-to-hire
-                correlation. Both ChatModels implement ChatClient, so switching
-                is a bean qualifier rather than a rewrite.                       -->
+                shadow-running the mid tier (now gpt-5.6-terra) against Claude
+                Haiku 4.5 over the first ~50 interviews and selecting on measured
+                score-to-hire correlation.                                       -->
         <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-starter-model-anthropic</artifactId>
         </dependency>
+
+        <!-- ── Adding a third provider ──────────────────────── -->
+        <!--    This block is the whole integration. AiConfig resolves
+                app.ai.*.vendor against whatever ChatModel beans exist at runtime
+                and configures them through portable ChatOptions, so a new
+                provider needs a starter here, credentials under spring.ai.*, and
+                a string in application.yml — no Java change, no new abstraction.
+
+                Uncomment to evaluate Gemini. The reason to consider Google is NOT
+                price: Flash-Lite beats the OpenAI nano tier by about Rs.0.05 per
+                interview, which does not justify a third API key. The reason is
+                that Vertex AI publishes per-region ML-processing commitments and
+                asia-south1 (Mumbai) is a Gemini region — which, if confirmed in
+                writing with Google, is the only route found so far to keeping
+                inference in India. Bedrock cannot: Claude in ap-south-1 uses
+                global cross-Region inference. Verify before this reaches the
+                privacy policy.
+
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-model-vertex-ai-gemini</artifactId>
+        </dependency>
+                                                                                 -->
 
         <!-- ── StringTemplate — prompt templates ────────────── -->
         <!--    PRD §7.5.1: "Prompts live as StringTemplate .st files under
@@ -385,6 +413,14 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
+                    <!-- Pinned rather than discovered. Left unset, `repackage`
+                         scans the packaged classes for a main method, and that
+                         scan comes up empty ("Unable to find main class") if
+                         anything rewrites target/classes mid-build — IntelliJ's
+                         auto-build compiles a Maven module into this same
+                         directory. Naming the class skips the scan. -->
+                    <mainClass>com.interviewiq.InterviewIqApplication</mainClass>
+
                     <!-- Exclude Lombok from the final fat JAR -->
                     <excludes>
                         <exclude>
@@ -468,6 +504,7 @@
                 <artifactId>jacoco-maven-plugin</artifactId>
                 <version>${jacoco.version}</version>
                 <configuration>
+                    <skip>${skipCoverage}</skip>
                     <excludes>
                         <exclude>**/InterviewIqApplication.*</exclude>
                         <exclude>**/dto/**</exclude>

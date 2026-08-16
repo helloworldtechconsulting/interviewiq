@@ -73,8 +73,33 @@ spring:
       # would be the wrong shape — and gpt-4o, which was set here, is no longer
       # on the price list.
       api-key: ${OPENAI_API_KEY:}
+
+      # ── The cheap-provider escape hatch ──────────────────────────────────
+      # Most low-cost inference providers speak the OpenAI wire protocol:
+      # DeepSeek, Groq, Together, Fireworks, OpenRouter, and a local Ollama or
+      # vLLM all expose /v1/chat/completions. Pointing this at one of them, with
+      # that provider's key and its model IDs in app.ai.*.model, moves every
+      # workflow across without a new starter, a new dependency, or a Java
+      # change — an env var and a redeploy.
+      #
+      #   OPENAI_BASE_URL=https://api.deepseek.com
+      #   OPENAI_API_KEY=<their key>
+      #   APP_AI_QUESTION_MODEL=deepseek-chat
+      #
+      # This is a different mechanism from app.ai.*.vendor, and worth keeping
+      # straight. `vendor` chooses between providers whose starters are on the
+      # classpath and whose protocols genuinely differ (Anthropic, Gemini).
+      # base-url swaps the endpoint behind the OpenAI-shaped client. The second
+      # is the cheaper path in every sense, and the one to reach for first.
+      #
+      # One caveat before switching on price alone: PRD §10 keeps candidate data
+      # in India, and a provider's inference region is part of that promise. The
+      # protocol being compatible does not make the jurisdiction acceptable.
+      base-url: ${OPENAI_BASE_URL:https://api.openai.com}
+
     anthropic:
       api-key: ${ANTHROPIC_API_KEY:}
+      base-url: ${ANTHROPIC_BASE_URL:https://api.anthropic.com}
 
 # =============================================================================
 # Management / Actuator
@@ -296,21 +321,29 @@ app:
   # ── AI: vendor and model per workflow (PRD v2.1 §9.1) ─────────────────────
   # Each workflow gets its own ChatClient bean, injected by qualifier. Changing
   # vendor is a config flip and a redeploy — which is also the failover plan.
+  #
+  # `vendor` is matched at runtime against the ChatModel beans actually present,
+  # so adding a provider is: starter in pom.xml + credentials under spring.ai +
+  # the name here. No Java change. Names are derived from the model class
+  # (OpenAiChatModel -> openai); vendor-aliases below covers the friendly ones.
+  #
   # Confirm exact model strings against the provider price list at deploy time:
-  # the price tiers are stable, the labels are not.
+  # the price tiers are stable, the labels are not. gpt-4o went stale here once,
+  # then gpt-5.4-nano did.
   ai:
     question:
       vendor: openai
-      model: gpt-5.4-nano        # templated, structured, low-judgement — cheapest tier
+      model: gpt-5.6-luna        # nano tier: $0.10/$0.60 per MTok, ~Rs.0.20/interview
       temperature: 0.4           # some variety across candidates for the same JD
     followup:
       vendor: openai
-      model: gpt-5.4-nano        # trivial real-time classification, latency-sensitive
+      model: gpt-5.6-luna        # trivial real-time classification, latency-sensitive
       temperature: 0.2
     evaluation:
       # "Undecided by design" (§13.1) — Haiku is the blind-choice default because
-      # calibration matters more than the ~Rs.0.25 difference. Decide on measured
-      # score-to-hire correlation from the shadow run, not on price.
+      # calibration matters more than price. After the Aug-2026 reprice the two
+      # candidates are within Rs.0.25/interview of each other ($1/$5 vs $1/$6),
+      # so decide on measured score-to-hire correlation. There is no price tiebreak.
       vendor: anthropic
       model: claude-haiku-4-5
       temperature: 0.1           # the same transcript must score the same twice
@@ -318,7 +351,12 @@ app:
     # interviews (~Rs.900 for the whole experiment).
     shadow-evaluation: false
     shadow-vendor: openai
-    shadow-model: gpt-5.4-mini
+    shadow-model: gpt-5.6-terra
+    # Friendly name -> derived vendor key. Additive: these merge into the
+    # defaults in AiWorkflowProperties rather than replacing them. Override only
+    # to teach the app a provider nobody anticipated.
+    # vendor-aliases:
+    #   google: vertexaigemini
     prompt-caching: true         # ~90% off question-generation input on a 200-candidate opening
     evaluation-max-attempts: 3   # then the session is flagged ERROR for manual review
   razorpay:

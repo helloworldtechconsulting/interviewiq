@@ -2,6 +2,9 @@ package com.interviewiq.ai.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 /**
  * Per-workflow AI vendor and model selection (PRD v2.1 §9.1).
  *
@@ -12,8 +15,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * <pre>
  * app:
  *   ai:
- *     question:   { vendor: openai,    model: gpt-5.4-nano }
- *     followup:   { vendor: openai,    model: gpt-5.4-nano }
+ *     question:   { vendor: openai,    model: gpt-5.6-luna }
+ *     followup:   { vendor: openai,    model: gpt-5.6-luna }
  *     evaluation: { vendor: anthropic, model: claude-haiku-4-5 }
  * </pre>
  *
@@ -22,6 +25,24 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * outage becomes a config flip and a redeploy; and a negotiating position once
  * spend becomes meaningful.
  *
+ * <h2>Adding a provider</h2>
+ *
+ * <p>{@link AiConfig} resolves {@code vendor} against the {@code ChatModel} beans
+ * present at runtime, so a third provider needs no Java change at all:
+ *
+ * <ol>
+ *   <li>add its Spring AI starter to {@code pom.xml}
+ *       (e.g. {@code spring-ai-starter-model-vertex-ai-gemini});</li>
+ *   <li>set its credentials in {@code spring.ai.*};</li>
+ *   <li>point a workflow at it: {@code vendor: google}.</li>
+ * </ol>
+ *
+ * <p>Vendor names are derived from the model class — {@code OpenAiChatModel} →
+ * {@code openai}, {@code VertexAiGeminiChatModel} → {@code vertexaigemini} — which
+ * is precise but not what anyone types. {@link #getVendorAliases()} maps the
+ * names people actually use onto those keys, and is itself configuration, so an
+ * unanticipated provider can be aliased without a build.
+ *
  * <h2>Why evaluation is deliberately undecided</h2>
  *
  * <p>§13.1 is unusually candid: "Accuracy is not knowable from public data." The
@@ -29,21 +50,32 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * outcome, on Indian SMB screening interviews in Indian English — does not exist.
  * So the plan is to instrument rather than guess: score the first ~50 interviews
  * with both candidates, serve one and log both, and select on real Pearson r for
- * about ₹900 total. At the mini/Haiku tier the two vendors are within 16% of each
- * other, roughly ₹125/month across 500 interviews — "that is noise; do not choose
- * a vendor on it."
+ * about ₹900 total.
+ *
+ * <p>The August 2026 reprice strengthened this rather than settling it: the two
+ * evaluation candidates are now within a rupee of each other per interview
+ * (Haiku 4.5 at $1/$5, gpt-5.6-terra at $1/$6), and the whole cheapest-to-flagship
+ * spread is about ₹5 on a ₹100 product. There is no longer even a price argument
+ * to hide behind — this is a measurement, or it is a guess.
  *
  * <p>Model version strings must be confirmed against the provider price list at
- * implementation time. The price <em>tiers</em> are stable; the labels are not.
+ * implementation time. The price <em>tiers</em> are stable; the labels are not —
+ * {@code gpt-4o}, then {@code gpt-5.4-nano}, have both already gone stale here.
  */
 @ConfigurationProperties(prefix = "app.ai")
 public class AiWorkflowProperties {
 
-    /** Question generation — templated, structured, low-judgement. Cheapest tier. */
-    private final Workflow question = new Workflow("openai", "gpt-5.4-nano");
+    /**
+     * Question generation — templated, structured, low-judgement. Cheapest tier.
+     *
+     * <p>{@code gpt-5.6-luna} replaced {@code gpt-5.4-nano} on 16 Aug 2026: same
+     * nano tier, half the price ($0.10/$0.60 against $0.20/$1.25), and 5.4 is no
+     * longer on the published price list.
+     */
+    private final Workflow question = new Workflow("openai", "gpt-5.6-luna");
 
     /** Follow-up decision — trivial real-time classification, latency-sensitive. */
-    private final Workflow followup = new Workflow("openai", "gpt-5.4-nano");
+    private final Workflow followup = new Workflow("openai", "gpt-5.6-luna");
 
     /**
      * Evaluation — score quality is the product.
@@ -56,6 +88,23 @@ public class AiWorkflowProperties {
     private final Workflow evaluation = new Workflow("anthropic", "claude-haiku-4-5");
 
     /**
+     * Friendly vendor name → the key {@link AiConfig} derives from the model class.
+     *
+     * <p>Seeded with the obvious ones and additive: entries under
+     * {@code app.ai.vendor-aliases} merge into these rather than replacing them.
+     */
+    private final Map<String, String> vendorAliases = new LinkedHashMap<>(Map.of(
+            "gpt",         "openai",
+            "chatgpt",     "openai",
+            "claude",      "anthropic",
+            "google",      "vertexaigemini",
+            "gemini",      "vertexaigemini",
+            "vertexai",    "vertexaigemini",
+            "azure",       "azureopenai",
+            "bedrock",     "bedrockproxy",
+            "mistral",     "mistralai"));
+
+    /**
      * Shadow mode: score with both vendors, serve one, log both (§13.1).
      *
      * <p>Off by default; enabled for the first ~50 interviews to produce a real
@@ -65,7 +114,8 @@ public class AiWorkflowProperties {
 
     private String shadowVendor = "openai";
 
-    private String shadowModel = "gpt-5.4-mini";
+    /** Mid tier, the like-for-like comparison against Haiku 4.5. Was {@code gpt-5.4-mini}. */
+    private String shadowModel = "gpt-5.6-terra";
 
     /** Maximum retries before a report is flagged ERROR for manual review (§7.5.5). */
     private int evaluationMaxAttempts = 3;
@@ -73,16 +123,20 @@ public class AiWorkflowProperties {
     /**
      * Prompt caching on the JD and system prompt (§7.5.1, §13.1).
      *
-     * <p>One opening generates questions for up to 200 candidates against the
-     * same JD. Cache reads cost about 10% of base input, cutting
-     * question-generation input cost by roughly 90% — "this saves more than
-     * switching vendors does."
+     * <p>Cache reads cost about 10% of base input at every provider currently in
+     * scope. Note the sizing in §13.1 predates two-stage generation, which already
+     * collapsed question-generation cost by ~77% by calling the model once per
+     * <em>job</em> rather than once per candidate — do not count that saving
+     * twice. The lever still on the table is caching the rubric and JD prefix on
+     * the <em>evaluation</em> call, which fires once per answer.
      */
     private boolean promptCaching = true;
 
     public Workflow getQuestion()   { return question; }
     public Workflow getFollowup()   { return followup; }
     public Workflow getEvaluation() { return evaluation; }
+
+    public Map<String, String> getVendorAliases() { return vendorAliases; }
 
     public boolean isShadowEvaluation() { return shadowEvaluation; }
     public void setShadowEvaluation(boolean shadowEvaluation) { this.shadowEvaluation = shadowEvaluation; }

@@ -2,28 +2,56 @@ package com.interviewiq.ai.config;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.anthropic.AnthropicChatModel;
-import org.springframework.ai.anthropic.AnthropicChatOptions;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.prompt.ChatOptions;
-import org.springframework.ai.openai.OpenAiChatModel;
-import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
+import org.springframework.util.ClassUtils;
 
+import java.util.LinkedHashMap;
 import java.util.Locale;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * Builds one {@link ChatClient} per AI workflow (PRD v2.1 §9.1).
  *
  * <p>"Each workflow gets its own {@code ChatClient} bean built from configuration
  * and injected by qualifier." Vendor and model are both configuration values, so
- * switching a workflow between OpenAI and Anthropic — or failing over during a
- * provider outage — is a config change and a redeploy, not a rewrite. Both
- * vendors' models implement {@code ChatModel}, which is what makes that true.
+ * switching a workflow between providers — or failing over during a provider
+ * outage — is a config change and a redeploy, not a rewrite.
+ *
+ * <h2>Why this class no longer names any vendor</h2>
+ *
+ * <p>It used to. A {@code switch} listed {@code "openai"} and {@code "anthropic"},
+ * the constructor took one {@code ObjectProvider} per vendor, and the options
+ * builder was a ternary between {@code OpenAiChatOptions} and
+ * {@code AnthropicChatOptions}. That is two-vendor code wearing the vocabulary of
+ * vendor-agnostic code: the config *said* vendor was a runtime value, but adding
+ * a third provider meant editing Java in three places and shipping a new build.
+ *
+ * <p>Now the class discovers whatever {@link ChatModel} beans Spring AI's
+ * auto-configuration put on the classpath and keys them by a name derived from
+ * the implementation class ({@code OpenAiChatModel} → {@code openai},
+ * {@code VertexAiGeminiChatModel} → {@code vertexaigemini}). **Adding a provider
+ * is a Maven starter, an API key, and a string in {@code application.yml} — no
+ * Java change.** Removing one is deleting the starter.
+ *
+ * <h2>The deliberate constraint: portable options only</h2>
+ *
+ * <p>Options are built with the portable {@link ChatOptions#builder()}, not a
+ * provider's own options class. Spring AI merges portable options into each
+ * provider's native shape at request time, so model and temperature work
+ * everywhere. The trade-off is real and worth stating: provider-exclusive knobs
+ * (OpenAI reasoning effort, Anthropic extended thinking, Gemini safety settings)
+ * are <em>not</em> reachable through this path. That is the price of genuine
+ * portability, and it is the right price here — none of the three workflows needs
+ * one. The day a workflow does, the honest fix is a per-vendor options
+ * customiser, not a quiet {@code instanceof} in this method.
  *
  * @see AiWorkflowProperties for why the evaluation vendor is undecided by design
  */
@@ -37,16 +65,28 @@ public class AiConfig {
     public static final String EVALUATION_CLIENT = "evaluationChatClient";
     public static final String SHADOW_CLIENT     = "shadowEvaluationChatClient";
 
-    private final AiWorkflowProperties properties;
-    private final ObjectProvider<OpenAiChatModel> openAi;
-    private final ObjectProvider<AnthropicChatModel> anthropic;
+    private static final String CHAT_MODEL_SUFFIX = "ChatModel";
 
-    public AiConfig(AiWorkflowProperties properties,
-                    ObjectProvider<OpenAiChatModel> openAi,
-                    ObjectProvider<AnthropicChatModel> anthropic) {
+    private final AiWorkflowProperties properties;
+
+    /** Every provider on the classpath, keyed by its derived vendor name. */
+    private final Map<String, ChatModel> modelsByVendor;
+
+    public AiConfig(AiWorkflowProperties properties, ObjectProvider<ChatModel> chatModels) {
         this.properties = properties;
-        this.openAi     = openAi;
-        this.anthropic  = anthropic;
+        this.modelsByVendor = chatModels.orderedStream()
+                .collect(Collectors.toMap(
+                        AiConfig::vendorKeyOf,
+                        Function.identity(),
+                        (first, duplicate) -> first,
+                        LinkedHashMap::new));
+
+        if (modelsByVendor.isEmpty()) {
+            log.warn("No ChatModel beans found. Every AI workflow will fail to start. "
+                    + "Check that a Spring AI model starter is on the classpath and its API key is set.");
+        } else {
+            log.info("AI providers available: {}", modelsByVendor.keySet());
+        }
     }
 
     @Bean(QUESTION_CLIENT)
@@ -108,46 +148,80 @@ public class AiConfig {
     // =========================================================================
 
     private ChatClient clientFor(String workflowName, AiWorkflowProperties.Workflow workflow) {
-        String vendor = workflow.getVendor() == null
-                ? "" : workflow.getVendor().trim().toLowerCase(Locale.ROOT);
+        ChatModel model = resolveVendor(workflowName, workflow.getVendor());
 
-        ChatModel model = switch (vendor) {
-            case "openai"    -> requireModel(openAi.getIfAvailable(), "openai", workflowName);
-            case "anthropic" -> requireModel(anthropic.getIfAvailable(), "anthropic", workflowName);
-            default -> throw new IllegalStateException(
-                    "Unknown AI vendor '" + workflow.getVendor() + "' for workflow '" + workflowName
-                            + "'. Supported: openai, anthropic.");
-        };
+        if (workflow.getModel() == null || workflow.getModel().isBlank()) {
+            throw new IllegalStateException(
+                    "Workflow '" + workflowName + "' has no model configured. "
+                            + "Set app.ai." + workflowName + ".model to a model ID the provider currently sells.");
+        }
 
         log.info("AI workflow '{}' bound to {}", workflowName, workflow);
 
         return ChatClient.builder(model)
-                .defaultOptions(optionsFor(vendor, workflow))
+                .defaultOptions(ChatOptions.builder()
+                        .model(workflow.getModel())
+                        .temperature(workflow.getTemperature())
+                        .build())
                 .build();
     }
 
-    private ChatOptions optionsFor(String vendor, AiWorkflowProperties.Workflow workflow) {
-        // Model and temperature are set per client rather than globally, because
-        // the whole point of this configuration is that the three workflows do
-        // not share a model.
-        return "anthropic".equals(vendor)
-                ? AnthropicChatOptions.builder()
-                        .model(workflow.getModel())
-                        .temperature(workflow.getTemperature())
-                        .build()
-                : OpenAiChatOptions.builder()
-                        .model(workflow.getModel())
-                        .temperature(workflow.getTemperature())
-                        .build();
-    }
+    /**
+     * Maps a configured vendor string onto one of the {@link ChatModel} beans
+     * that actually exist in this build.
+     *
+     * <p>The failure message lists what <em>is</em> available rather than a
+     * hardcoded list of what used to be, because the previous message ("Supported:
+     * openai, anthropic") would have been a lie the moment a third starter was
+     * added and a misdirection if a starter was present but its API key was not.
+     */
+    private ChatModel resolveVendor(String workflowName, String configuredVendor) {
+        String requested = normalize(configuredVendor);
 
-    private <T extends ChatModel> T requireModel(T model, String vendor, String workflowName) {
+        if (requested.isEmpty()) {
+            throw new IllegalStateException(
+                    "Workflow '" + workflowName + "' has no vendor configured. "
+                            + "Set app.ai." + workflowName + ".vendor to one of: " + modelsByVendor.keySet());
+        }
+
+        String key = properties.getVendorAliases().getOrDefault(requested, requested);
+        ChatModel model = modelsByVendor.get(key);
+
         if (model == null) {
             throw new IllegalStateException(
-                    "Workflow '" + workflowName + "' is configured for vendor '" + vendor
-                            + "' but no " + vendor + " ChatModel is available. "
-                            + "Check that the API key for that provider is set.");
+                    "Workflow '" + workflowName + "' is configured for vendor '" + configuredVendor
+                            + "' (resolved to '" + key + "') but no such ChatModel is available. "
+                            + "Available: " + modelsByVendor.keySet() + ". "
+                            + "Known aliases: " + properties.getVendorAliases() + ". "
+                            + "A provider appears here only when both its Spring AI starter is on the "
+                            + "classpath and its API key is set.");
         }
         return model;
+    }
+
+    /**
+     * Derives a stable vendor key from the model implementation class:
+     * {@code OpenAiChatModel} → {@code openai}, {@code AnthropicChatModel} →
+     * {@code anthropic}, {@code VertexAiGeminiChatModel} → {@code vertexaigemini}.
+     *
+     * <p>Keyed off the class rather than the bean name because bean names are an
+     * auto-configuration detail that Spring AI has already renamed once
+     * ({@code spring-ai-openai-spring-boot-starter} →
+     * {@code spring-ai-starter-model-openai}), whereas the model class name is
+     * public API. {@code ClassUtils.getUserClass} unwraps any CGLIB proxy so a
+     * decorated bean still resolves to the same key.
+     */
+    static String vendorKeyOf(ChatModel model) {
+        String name = ClassUtils.getUserClass(model).getSimpleName();
+        int suffix = name.indexOf(CHAT_MODEL_SUFFIX);
+        if (suffix > 0) {
+            name = name.substring(0, suffix);
+        }
+        return normalize(name);
+    }
+
+    /** Lowercases and drops separators, so {@code vertex-ai-gemini} and {@code VertexAiGemini} agree. */
+    static String normalize(String value) {
+        return value == null ? "" : value.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
     }
 }

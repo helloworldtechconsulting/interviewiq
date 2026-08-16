@@ -91,13 +91,27 @@ public interface JobOpeningRepository extends JpaRepository<JobOpening, UUID> {
      * lowercased here rather than at the call site so the {@code LOWER()} on both
      * sides stays visible next to the index that would need to support it.
      */
+    /*
+     * CAST(:search AS String) is load-bearing, not decoration.
+     *
+     * Without it, a null search — which is the DEFAULT for this endpoint, since
+     * the filter is optional — reaches PostgreSQL as an untyped bind parameter.
+     * PostgreSQL cannot infer a type for it from LIKE alone, guesses bytea, and
+     * the statement dies with:
+     *
+     *     ERROR: operator does not exist: text ~~ bytea
+     *
+     * The result was a 500 on GET /api/v1/jobs with no filters applied, which is
+     * the first request the jobs page makes. The cast gives the parameter an
+     * explicit varchar type so the comparison resolves.
+     */
     @Query("""
            SELECT j FROM JobOpening j
            WHERE j.companyId = :companyId
              AND (:status IS NULL OR j.status = :status)
-             AND (:search IS NULL
-                  OR LOWER(j.title)      LIKE CONCAT('%', :search, '%')
-                  OR LOWER(j.department) LIKE CONCAT('%', :search, '%'))
+             AND (CAST(:search AS String) IS NULL
+                  OR LOWER(j.title)      LIKE CONCAT('%', CAST(:search AS String), '%')
+                  OR LOWER(j.department) LIKE CONCAT('%', CAST(:search AS String), '%'))
            ORDER BY j.createdAt DESC
            """)
     Page<JobOpening> search(@Param("companyId") UUID companyId,
