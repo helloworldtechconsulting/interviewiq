@@ -8,6 +8,7 @@ import com.interviewiq.auth.service.TokenService;
 import com.interviewiq.billing.service.WalletService;
 import com.interviewiq.candidate.domain.Candidate;
 import com.interviewiq.candidate.infrastructure.CandidateRepository;
+import com.interviewiq.company.domain.Company;
 import com.interviewiq.company.infrastructure.CompanyRepository;
 import com.interviewiq.email.service.EmailService;
 import com.interviewiq.job.domain.JobOpening;
@@ -64,7 +65,7 @@ import java.util.stream.Collectors;
  * <h2>In-browser interview flow (PRD v3)</h2>
  * <ol>
  *   <li>{@link #initInterview()} — candidate opens the room; returns questions + pre-signed recording URL.</li>
- *   <li>{@link #startInterview()} — browser calls when candidate confirms camera/mic; INVITED → STARTED.</li>
+ *   <li>{@link #startInterview()} — browser calls when candidate confirms camera/mic; INVITED → IN_PROGRESS.</li>
  *   <li>{@link #completeInterview(CompleteInterviewRequest)} — browser calls after all questions; merges transcripts
  *       into {@code questionsJson}, flips to COMPLETED, settles billing, triggers evaluation.</li>
  *   <li>{@link #failInterview(String)} — browser calls on fatal error; sets ERROR state.</li>
@@ -158,7 +159,7 @@ public class SessionService {
         session.setCandidateId(req.candidateId());
         session.setStatus(SessionStatus.INVITED);
         session.setQuestionGenerationStatus(PipelineStatus.PENDING);
-        session.setScheduledAt(req.scheduledAt());
+        session.setScheduledStartAt(req.scheduledAt());
         session.setInviteExpiresAt(
                 OffsetDateTime.now(ZoneOffset.UTC)
                         .plus(securityProperties.getInvite().getExpiration()));
@@ -182,13 +183,7 @@ public class SessionService {
         report.setGenerationStatus(PipelineStatus.PENDING);
         evaluationReportRepository.save(report);
 
-        // Dispatch invite email
-        String companyName = companyRepository.findById(companyId)
-                .map(c -> c.getName())
-                .orElse("InterviewIQ");
-        String inviteUrl = frontendBaseUrl + "/interview?token=" + inviteToken;
-        emailService.sendCandidateInviteEmail(
-                candidate.getEmail(), candidate.getFullName(), companyName, inviteUrl, companyId);
+        dispatchInviteEmail(companyId, candidate, inviteToken);
 
         log.info("Session created: sessionId={} companyId={} candidateId={}",
                 session.getId(), companyId, candidate.getId());
@@ -227,6 +222,95 @@ public class SessionService {
     }
 
     /**
+     * Re-invites a candidate, doing one of two different things depending on where
+     * the existing session ended up.
+     *
+     * <p>Both are called "reinvite" by recruiters and they are not the same
+     * operation, so the endpoint resolves which one applies rather than making the
+     * caller know:
+     *
+     * <ul>
+     *   <li><strong>Still live ({@code INVITED} / {@code SCHEDULED})</strong> — the
+     *       candidate mislaid the email. Resend it and extend the invite window.
+     *       The token is deliberately <em>not</em> rotated: the whole reason for
+     *       the request is that the candidate cannot find their link, and rotating
+     *       would break the copy they might still have. No money moves, because the
+     *       existing reservation is still held.</li>
+     *   <li><strong>Finished unused ({@code EXPIRED} / {@code CANCELLED} /
+     *       {@code ERROR})</strong> — there is nothing to resend. A new session is
+     *       created, which takes a fresh ₹100 reservation and a fresh token. The
+     *       old session is left as it is: it is a terminal state and the history of
+     *       an expired invite is worth keeping.</li>
+     * </ul>
+     *
+     * <p>A session that is under way or already scored is refused. Re-inviting
+     * someone mid-interview would give them a second concurrent room, and
+     * re-inviting after a completed interview means charging twice for a candidate
+     * who already has a report — if a genuine re-interview is wanted, that is a new
+     * session and should look like one.
+     */
+    @Auditable(action = "SESSION_REINVITED", entityType = "SESSION", entityIdArg = 0)
+    @Transactional
+    public SessionResponse reinvite(UUID sessionId) {
+        InterviewSession session = requireSession(sessionId);
+
+        return switch (session.getStatus()) {
+            case INVITED, SCHEDULED -> resendInvite(session);
+            // NO_SHOW belongs with the other unused endings: the reservation was
+            // already released when the sweep marked it, so a re-invite has to
+            // take a fresh one. It is also the most likely reinvite of all —
+            // "they missed it, send it again" is the request this endpoint will
+            // mostly serve.
+            case EXPIRED, CANCELLED, NO_SHOW, ERROR -> createReplacementSession(session);
+            case IN_PROGRESS, EVALUATING -> throw new SessionStateException(
+                    "This interview is already under way, so a new invite cannot be sent.");
+            case COMPLETED -> throw new SessionStateException(
+                    "This candidate has already completed their interview. "
+                            + "Create a new interview if you want to assess them again.");
+        };
+    }
+
+    /** Resends the existing invite and pushes its expiry out, without touching the token or the wallet. */
+    private SessionResponse resendInvite(InterviewSession session) {
+        Candidate candidate = candidateRepository.findById(session.getCandidateId())
+                .orElseThrow(() -> new ResourceNotFoundException("Candidate", session.getCandidateId()));
+
+        // The stored value is a hash, so the original token cannot be recovered.
+        // Reissuing the same claims yields a link that resolves to the same session,
+        // and the hash is re-stored so both the old and new emails work.
+        String inviteToken = tokenService.generateInviteToken(
+                session.getId(), candidate.getId(), session.getCompanyId());
+        session.setInviteTokenHash(tokenService.hashToken(inviteToken));
+        session.setInviteExpiresAt(
+                OffsetDateTime.now(ZoneOffset.UTC)
+                        .plus(securityProperties.getInvite().getExpiration()));
+        sessionRepository.save(session);
+
+        dispatchInviteEmail(session.getCompanyId(), candidate, inviteToken);
+
+        log.info("Invite resent: sessionId={} candidateId={}", session.getId(), candidate.getId());
+        return SessionResponse.from(session);
+    }
+
+    /** Creates a fresh session for the same candidate and job after an unused one ended. */
+    private SessionResponse createReplacementSession(InterviewSession previous) {
+        log.info("Creating replacement session: previousSessionId={} previousStatus={}",
+                previous.getId(), previous.getStatus());
+        return create(new CreateSessionRequest(
+                previous.getJobOpeningId(), previous.getCandidateId(), null));
+    }
+
+    /** Sends the candidate invite email for a session. */
+    private void dispatchInviteEmail(UUID companyId, Candidate candidate, String inviteToken) {
+        String companyName = companyRepository.findById(companyId)
+                .map(Company::getName)
+                .orElse("InterviewIQ");
+        String inviteUrl = frontendBaseUrl + "/interview?token=" + inviteToken;
+        emailService.sendCandidateInviteEmail(
+                candidate.getEmail(), candidate.getFullName(), companyName, inviteUrl, companyId);
+    }
+
+    /**
      * Cancels a session that is still in INVITED state.
      * Releases the billing reservation.
      */
@@ -250,12 +334,25 @@ public class SessionService {
         return SessionResponse.from(session);
     }
 
-    @Transactional(readOnly = true)
+    // Not read-only: the first view is stamped here, which is a write.
+    @Transactional
     public EvaluationReportResponse getEvaluation(UUID sessionId) {
         UUID companyId = SecurityContext.requireCompanyId();
         EvaluationReport report = evaluationReportRepository
                 .findByCompanyIdAndSessionId(companyId, sessionId)
                 .orElseThrow(() -> new ResourceNotFoundException("EvaluationReport for session", sessionId));
+
+        // Stamp the first employer view, which is what the dashboard's
+        // "awaiting review" counter measures (§7.7, V055). Written once and
+        // never refreshed: re-reading a report already acted on should not make
+        // it look unread, and this is a backlog counter rather than an activity
+        // log. Only a finished report counts — opening one still generating is
+        // not the recruiter reading anything.
+        if (report.getViewedAt() == null && report.getGenerationStatus() == PipelineStatus.DONE) {
+            report.setViewedAt(OffsetDateTime.now(ZoneOffset.UTC));
+            evaluationReportRepository.save(report);
+        }
+
         return EvaluationReportResponse.from(report);
     }
 
@@ -294,17 +391,17 @@ public class SessionService {
                 session.getQuestionsJson(),
                 uploadUrl,
                 recordingKey,
-                session.getScheduledAt(),
+                session.getScheduledStartAt(),
                 session.getInviteExpiresAt(),
                 googleVerified
         );
     }
 
     /**
-     * Transitions the session from INVITED → STARTED when the candidate confirms
+     * Transitions the session from INVITED → IN_PROGRESS when the candidate confirms
      * their camera/microphone are working and begins the interview.
      *
-     * <p>Idempotent: calling this on an already-STARTED session is a no-op that
+     * <p>Idempotent: calling this on an already-IN_PROGRESS session is a no-op that
      * returns the current session state. This handles browser refresh mid-interview.
      */
     @Transactional
@@ -314,11 +411,11 @@ public class SessionService {
                 .orElseThrow(() -> new ResourceNotFoundException("InterviewSession", sessionId));
 
         if (session.getStatus() == SessionStatus.INVITED) {
-            session.setStatus(SessionStatus.STARTED);
+            session.setStatus(SessionStatus.IN_PROGRESS);
             session.setStartedAt(OffsetDateTime.now(ZoneOffset.UTC));
             sessionRepository.save(session);
             log.info("Interview started: sessionId={}", sessionId);
-        } else if (session.getStatus() != SessionStatus.STARTED) {
+        } else if (session.getStatus() != SessionStatus.IN_PROGRESS) {
             throw new SessionStateException(
                     "Cannot start interview in current state: " + session.getStatus());
         }
@@ -332,10 +429,10 @@ public class SessionService {
         InterviewSession session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new ResourceNotFoundException("InterviewSession", sessionId));
 
-        if (session.getStatus() != SessionStatus.STARTED) {
+        if (session.getStatus() != SessionStatus.IN_PROGRESS) {
             throw new SessionStateException(
                     "Cannot complete interview in state " + session.getStatus() +
-                    ". Session must be STARTED.");
+                    ". Session must be IN_PROGRESS.");
         }
 
         String mergedJson = mergeAnswersIntoQuestionsJson(

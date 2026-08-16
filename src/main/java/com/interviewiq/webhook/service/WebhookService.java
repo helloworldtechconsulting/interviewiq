@@ -14,14 +14,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
-import java.security.InvalidKeyException;
-import java.security.NoSuchAlgorithmException;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
-import java.util.HexFormat;
 import java.util.UUID;
 
 /**
@@ -48,19 +43,22 @@ public class WebhookService {
 
     private static final Logger log = LoggerFactory.getLogger(WebhookService.class);
 
-    private final WebhookEventRepository webhookEventRepository;
-    private final WalletService          walletService;
-    private final RazorpayProperties     razorpayProps;
-    private final ObjectMapper           objectMapper;
+    private final WebhookEventRepository   webhookEventRepository;
+    private final WalletService            walletService;
+    private final RazorpayProperties       razorpayProps;
+    private final ObjectMapper             objectMapper;
+    private final WebhookSignatureVerifier signatureVerifier;
 
     public WebhookService(WebhookEventRepository webhookEventRepository,
                           WalletService walletService,
                           RazorpayProperties razorpayProps,
-                          ObjectMapper objectMapper) {
+                          ObjectMapper objectMapper,
+                          WebhookSignatureVerifier signatureVerifier) {
         this.webhookEventRepository = webhookEventRepository;
         this.walletService          = walletService;
         this.razorpayProps          = razorpayProps;
         this.objectMapper           = objectMapper;
+        this.signatureVerifier      = signatureVerifier;
     }
 
     // =========================================================================
@@ -75,7 +73,7 @@ public class WebhookService {
      */
     @Transactional
     public void handleRazorpay(byte[] rawBody, String signatureHeader) {
-        verifyHmac(rawBody, signatureHeader, razorpayProps.getKeySecret(), "Razorpay");
+        signatureVerifier.verify(rawBody, signatureHeader, razorpayProps.getKeySecret(), "Razorpay");
 
         String payloadJson = new String(rawBody, StandardCharsets.UTF_8);
         JsonNode root = parseJson(payloadJson);
@@ -93,10 +91,10 @@ public class WebhookService {
 
         WebhookEvent event = persist(WebhookProvider.RAZORPAY, eventType, payloadJson, idempotencyKey, null);
 
-        if ("payment.captured".equals(eventType)) {
-            processRazorpayPaymentCaptured(root, event);
-        } else {
-            log.debug("Unhandled Razorpay event type: {}", eventType);
+        switch (eventType == null ? "" : eventType) {
+            case "payment.captured" -> processRazorpayPaymentCaptured(root, event);
+            case "payment.failed"   -> processRazorpayPaymentFailed(root, event);
+            default -> log.debug("Unhandled Razorpay event type: {}", eventType);
         }
 
         markProcessed(event);
@@ -126,6 +124,40 @@ public class WebhookService {
         event.setCompanyId(companyId);
         walletService.confirmTopUp(orderId, amount, companyId);
         log.info("Razorpay payment captured: orderId={} companyId={} amount={}", orderId, companyId, amount);
+    }
+
+    /**
+     * Records a failed payment attempt (INTIQ-71).
+     *
+     * <p><strong>No wallet mutation.</strong> A failed payment never created a
+     * credit, so there is nothing to reverse — treating this as a debit would be
+     * the actual bug. The value of handling the event at all is diagnostic: when
+     * a customer says "I paid and my balance did not change", the answer is
+     * either "your bank declined it, here is the reason code" or "we have a
+     * problem", and without this row there is no way to tell which.
+     *
+     * <p>The failure reason is stored on the webhook event rather than emailed to
+     * the customer. Razorpay already tells them at the point of failure, in the
+     * checkout flow, with better context than we have — a second message from us
+     * minutes later would add confusion, not clarity.
+     */
+    private void processRazorpayPaymentFailed(JsonNode root, WebhookEvent event) {
+        JsonNode payment = root.path("payload").path("payment").path("entity");
+        String orderId     = payment.path("order_id").asText("");
+        String errorCode   = payment.path("error_code").asText("");
+        String errorReason = payment.path("error_description").asText("");
+        String receiptId   = root.path("payload").path("order").path("entity").path("receipt").asText("");
+
+        if (receiptId.startsWith("topup-")) {
+            try {
+                event.setCompanyId(UUID.fromString(receiptId.substring(6)));
+            } catch (IllegalArgumentException e) {
+                log.warn("Could not parse companyId from failed-payment receipt: {}", receiptId);
+            }
+        }
+
+        log.warn("Razorpay payment failed: orderId={} companyId={} code={} reason={}",
+                orderId, event.getCompanyId(), errorCode, errorReason);
     }
 
     private boolean isDuplicate(WebhookProvider provider, String idempotencyKey) {
@@ -158,27 +190,4 @@ public class WebhookService {
         }
     }
 
-    /**
-     * Verifies an HMAC-SHA256 signature over the raw request body.
-     *
-     * @throws ValidationException if the signature does not match
-     */
-    private void verifyHmac(byte[] body, String signature, String secret, String provider) {
-        if (secret == null || secret.isBlank()) {
-            // Stub mode: skip verification when secret is not configured
-            log.debug("[WEBHOOK STUB] Skipping {} signature verification (secret not configured)", provider);
-            return;
-        }
-        try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            String expected = HexFormat.of().formatHex(mac.doFinal(body));
-            if (!expected.equalsIgnoreCase(signature)) {
-                log.warn("{} webhook signature mismatch", provider);
-                throw new ValidationException("Invalid webhook signature.");
-            }
-        } catch (NoSuchAlgorithmException | InvalidKeyException e) {
-            throw new RuntimeException("HMAC verification setup failed", e);
-        }
-    }
 }

@@ -2,6 +2,7 @@ package com.interviewiq.candidate.service;
 
 import com.interviewiq.candidate.domain.Candidate;
 import com.interviewiq.candidate.infrastructure.CandidateRepository;
+import com.interviewiq.shared.config.WorkerProperties;
 import com.interviewiq.shared.domain.PipelineStatus;
 import com.interviewiq.storage.service.StorageService;
 import org.apache.tika.exception.TikaException;
@@ -12,6 +13,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,6 +21,8 @@ import org.xml.sax.SAXException;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 /**
@@ -50,6 +54,7 @@ import java.util.List;
  * string is stored. This allows full local smoke testing without real S3.
  */
 @Component
+@ConditionalOnProperty(name = "app.schedulers.enabled", havingValue = "true", matchIfMissing = true)
 public class ResumeExtractionWorker {
 
     private static final Logger log = LoggerFactory.getLogger(ResumeExtractionWorker.class);
@@ -58,6 +63,7 @@ public class ResumeExtractionWorker {
 
     private final CandidateRepository candidateRepository;
     private final StorageService      storageService;
+    private final WorkerProperties    workerProperties;
 
     /**
      * Self-reference injected lazily to route {@link #extractSingle} calls through the proxy.
@@ -67,9 +73,11 @@ public class ResumeExtractionWorker {
     private ResumeExtractionWorker self;
 
     public ResumeExtractionWorker(CandidateRepository candidateRepository,
-                                  StorageService storageService) {
+                                  StorageService storageService,
+                                  WorkerProperties workerProperties) {
         this.candidateRepository = candidateRepository;
         this.storageService      = storageService;
+        this.workerProperties    = workerProperties;
     }
 
     /**
@@ -78,16 +86,18 @@ public class ResumeExtractionWorker {
      */
     @Scheduled(initialDelayString = "PT15S", fixedDelayString = "PT30S")
     public void extractPendingResumes() {
-        List<Candidate> workItems = candidateRepository
-                .findAllByResumeExtractionStatusInAndResumeS3KeyIsNotNull(
-                        List.of(PipelineStatus.PENDING, PipelineStatus.IN_PROGRESS));
+        OffsetDateTime staleBefore =
+                OffsetDateTime.now(ZoneOffset.UTC).minus(workerProperties.getStaleClaimAfter());
 
-        if (workItems.isEmpty()) return;
+        // Claims a distinct, bounded batch per pod (PRD v2.1 §7.9).
+        List<Candidate> claimed = candidateRepository.claimForResumeExtraction(
+                workerProperties.getExtractionBatchSize(), staleBefore);
 
-        log.debug("ResumeExtractionWorker: processing {} resume(s) (PENDING + IN_PROGRESS recovery)",
-                workItems.size());
+        if (claimed.isEmpty()) return;
 
-        for (Candidate candidate : workItems) {
+        log.debug("ResumeExtractionWorker: claimed {} resume(s)", claimed.size());
+
+        for (Candidate candidate : claimed) {
             self.extractSingle(candidate);  // call through proxy so @Transactional applies
         }
     }

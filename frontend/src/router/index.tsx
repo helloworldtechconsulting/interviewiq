@@ -72,11 +72,21 @@ const SettingsPage = lazy(() =>
     default: m.SettingsPage,
   })),
 );
+const AdminPanelPage = lazy(() =>
+  import("@/pages/employer/admin/AdminPanelPage").then((m) => ({
+    default: m.AdminPanelPage,
+  })),
+);
 
 // ── Candidate interview room (lazily loaded) ──────────────────────────────────
 const CandidateRoomPage = lazy(() =>
   import("@/pages/candidate/CandidateRoomPage").then((m) => ({
     default: m.CandidateRoomPage,
+  })),
+);
+const CandidateSchedulingPage = lazy(() =>
+  import("@/pages/candidate/CandidateSchedulingPage").then((m) => ({
+    default: m.CandidateSchedulingPage,
   })),
 );
 
@@ -160,6 +170,13 @@ export const router = createBrowserRouter([
             path: "/app/settings",
             element: <Lazy><SettingsPage /></Lazy>,
           },
+          {
+            // Platform staff only. The route existing is not the control — the
+            // endpoints behind it are PLATFORM_STAFF-gated server-side, so a
+            // customer who guesses the URL sees an empty console and 403s.
+            path: "/app/admin",
+            element: <Lazy><AdminPanelPage /></Lazy>,
+          },
         ],
       },
     ],
@@ -169,6 +186,17 @@ export const router = createBrowserRouter([
   {
     element: <InterviewLayout />,
     children: [
+      // The invite link lands here first. PRD v2.1 §7.1.2: opening the link
+      // "validates the token and returns session details WITHOUT starting the
+      // interview — it shows the scheduling page".
+      {
+        path: "/interview/schedule",
+        element: <Lazy><CandidateSchedulingPage /></Lazy>,
+      },
+      {
+        path: "/interview/room",
+        element: <Lazy><CandidateRoomPage /></Lazy>,
+      },
       {
         path: "/interview/:sessionId",
         element: <Lazy><CandidateRoomPage /></Lazy>,

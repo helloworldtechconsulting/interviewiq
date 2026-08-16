@@ -1,0 +1,18 @@
+# =============================================================================
+# frontend/.dockerignore — the SPA build context
+#
+# node_modules is the important line: the image installs its own from
+# package-lock.json, and shipping the host's copy both bloats the context and
+# risks platform-specific native modules built for the wrong architecture.
+# =============================================================================
+
+node_modules
+dist
+.env
+.env.*
+!.env.example
+.git
+.gitignore
+.DS_Store
+*.log
+coverage/

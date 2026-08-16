@@ -21,6 +21,7 @@ import {
   UsersRound,
   LogOut,
   Menu,
+  ShieldCheck,
   X,
 } from "lucide-react";
 import { cn, initials } from "@/lib/utils";
@@ -42,6 +43,14 @@ const navItems = [
   { to: "/app/settings", icon: Settings, label: "Settings" },
 ];
 
+/**
+ * Shown only to InterviewIQ staff. Hiding the link is a courtesy, not a
+ * control — every endpoint behind it is PLATFORM_STAFF-gated server-side.
+ */
+const staffNavItems = [
+  { to: "/app/admin", icon: ShieldCheck, label: "Platform" },
+];
+
 export function AppLayout() {
   const user = useAuthUser();
   const { sidebarOpen, toggleSidebar } = useUiStore();
@@ -53,7 +62,7 @@ export function AppLayout() {
     } catch {
       // Best-effort logout — always clear local state
     }
-    authStore.getState().logout();
+    authStore.getState().clearSession();
     queryClient.clear();
     navigate("/login", { replace: true });
   }
@@ -100,6 +109,27 @@ export function AppLayout() {
               {sidebarOpen && <span>{label}</span>}
             </NavLink>
           ))}
+
+          {user?.role === "PLATFORM_STAFF" &&
+            staffNavItems.map(({ to, icon: Icon, label }) => (
+              <NavLink
+                key={to}
+                to={to}
+                className={({ isActive }) =>
+                  cn(
+                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                    isActive
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                    !sidebarOpen && "justify-center px-2",
+                  )
+                }
+                title={!sidebarOpen ? label : undefined}
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                {sidebarOpen && <span>{label}</span>}
+              </NavLink>
+            ))}
         </nav>
 
         <Separator />

@@ -34,7 +34,7 @@ public record SessionResponse(
                 s.getCandidateId(),
                 s.getStatus(),
                 s.getQuestionGenerationStatus(),
-                s.getScheduledAt(),
+                s.getScheduledStartAt(),
                 s.getInviteExpiresAt(),
                 s.getStartedAt(),
                 s.getEndedAt(),

@@ -79,6 +79,62 @@ public class EvaluationReport {
     @Column(columnDefinition = "jsonb")
     private String evaluationJson;
 
+    /**
+     * Per-question narrative evidence (PRD v2.1 §7.6).
+     *
+     * <p>The PRD is unusually firm here: "every claim cites a specific answer —
+     * never a bare score", and "a report whose narrative does not cite answers is
+     * a defect, not a stylistic preference". The reasoning is commercial rather
+     * than cosmetic — a recruiter who can see <em>why</em> the score is 72 will
+     * trust and act on it, where a bare "72" gets ignored, and the quoted
+     * evidence is the best defence if a candidate ever challenges a decision.
+     *
+     * <p>Shape: an overall summary, a 2–3 sentence narrative per dimension, and a
+     * narrative per question, each carrying the answer ids it cites. Validated
+     * before persisting — a CHECK constraint cannot answer "does this citation
+     * point at an answer that exists", so the application does.
+     */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "evidence_jsonb", columnDefinition = "jsonb")
+    private String evidenceJson;
+
+    /** The 3-sentence overall summary shown at the top of the report. */
+    @Column(columnDefinition = "TEXT")
+    private String summaryText;
+
+    /** Full result JSON in object storage; the scores here are the queryable subset. */
+    @Column(name = "report_s3_key", length = 512)
+    private String reportS3Key;
+
+    /** Private internal notes, visible only within the employer's company (§7.6). */
+    @Column(columnDefinition = "TEXT")
+    private String employerNotes;
+
+    /**
+     * When an employer first opened this report, or null if nobody has.
+     *
+     * <p>Set once and never updated. "Last viewed" would answer a different
+     * question and would let a re-read make an already-actioned report look
+     * fresh again — the counter this feeds is a backlog, not an activity log.
+     */
+    @Column(name = "viewed_at")
+    private OffsetDateTime viewedAt;
+
+    /**
+     * When the report became available. The report-ready SLA is measured from
+     * session end to this timestamp — 30 minutes hard, ~5 minutes soft, median
+     * under 2 (§8, §16).
+     */
+    private OffsetDateTime generatedAt;
+
+    /**
+     * Set when the interview ended with more than 50% but fewer than all
+     * questions answered. A partial evaluation is still generated, and is
+     * clearly marked <em>Incomplete</em> on the report (§7.5.7).
+     */
+    @Column(name = "is_partial", nullable = false)
+    private boolean partial = false;
+
     @Column(nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 
@@ -145,4 +201,25 @@ public class EvaluationReport {
     public String toString() {
         return "EvaluationReport{id=" + id + ", sessionId=" + sessionId + ", generationStatus=" + generationStatus + "}";
     }
+
+    public String getEvidenceJson() { return evidenceJson; }
+    public void setEvidenceJson(String evidenceJson) { this.evidenceJson = evidenceJson; }
+
+    public String getSummaryText() { return summaryText; }
+    public void setSummaryText(String summaryText) { this.summaryText = summaryText; }
+
+    public String getReportS3Key() { return reportS3Key; }
+    public void setReportS3Key(String reportS3Key) { this.reportS3Key = reportS3Key; }
+
+    public OffsetDateTime getViewedAt() { return viewedAt; }
+    public void setViewedAt(OffsetDateTime viewedAt) { this.viewedAt = viewedAt; }
+
+    public String getEmployerNotes() { return employerNotes; }
+    public void setEmployerNotes(String employerNotes) { this.employerNotes = employerNotes; }
+
+    public OffsetDateTime getGeneratedAt() { return generatedAt; }
+    public void setGeneratedAt(OffsetDateTime generatedAt) { this.generatedAt = generatedAt; }
+
+    public boolean isPartial() { return partial; }
+    public void setPartial(boolean partial) { this.partial = partial; }
 }

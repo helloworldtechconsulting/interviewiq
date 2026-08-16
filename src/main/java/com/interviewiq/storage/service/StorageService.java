@@ -1,6 +1,8 @@
 package com.interviewiq.storage.service;
 
-import com.interviewiq.shared.config.AwsProperties;
+import com.interviewiq.shared.config.ObjectStorageProperties;
+import com.interviewiq.shared.exception.ValidationException;
+import com.interviewiq.storage.domain.UploadKind;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -9,6 +11,9 @@ import software.amazon.awssdk.core.ResponseBytes;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
+import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
+import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
+import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
@@ -17,13 +22,18 @@ import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignReques
 import java.time.Duration;
 
 /**
- * Wrapper around AWS S3 for presigned URL generation and object lifecycle management.
+ * Wrapper around S3-compatible object storage for pre-signed URL generation and
+ * object lifecycle management.
+ *
+ * <p>Works against S3, GCS interop, Cloudflare R2, DigitalOcean Spaces, MinIO or
+ * OCI — the difference is an endpoint override and path-style addressing, both
+ * configured in {@link com.interviewiq.shared.config.ObjectStorageConfig}.
  *
  * <p>All operations short-circuit to stub responses when
- * {@link AwsProperties#isUseLocalStub()} is {@code true}. Stub URLs are recognisable
+ * {@link ObjectStorageProperties#isUseLocalStub()} is {@code true}. Stub URLs are recognisable
  * by the {@code ?stub=} query parameter and are not valid for real S3 requests.
  *
- * <p>Objects are always stored in the bucket configured via {@code app.aws.s3-bucket}.
+ * <p>Objects are always stored in the bucket configured via {@code app.storage.bucket}.
  * Callers supply only the <em>object key</em> (the path within the bucket).
  */
 @Service
@@ -33,9 +43,9 @@ public class StorageService {
 
     private final S3Client    s3Client;
     private final S3Presigner s3Presigner;
-    private final AwsProperties props;
+    private final ObjectStorageProperties props;
 
-    public StorageService(S3Client s3Client, S3Presigner s3Presigner, AwsProperties props) {
+    public StorageService(S3Client s3Client, S3Presigner s3Presigner, ObjectStorageProperties props) {
         this.s3Client    = s3Client;
         this.s3Presigner = s3Presigner;
         this.props       = props;
@@ -52,14 +62,14 @@ public class StorageService {
      */
     public String generatePresignedUploadUrl(String objectKey, String contentType, Duration expiry) {
         if (props.isUseLocalStub()) {
-            log.info("[S3 STUB] presignedUpload bucket={} key={} contentType={}", props.getS3Bucket(), objectKey, contentType);
-            return "http://localhost:4566/" + props.getS3Bucket() + "/" + objectKey + "?stub=upload";
+            log.info("[STORAGE STUB] presignedUpload bucket={} key={} contentType={}", props.getBucket(), objectKey, contentType);
+            return "http://localhost:4566/" + props.getBucket() + "/" + objectKey + "?stub=upload";
         }
 
         PutObjectPresignRequest request = PutObjectPresignRequest.builder()
                 .signatureDuration(expiry)
                 .putObjectRequest(PutObjectRequest.builder()
-                        .bucket(props.getS3Bucket())
+                        .bucket(props.getBucket())
                         .key(objectKey)
                         .contentType(contentType)
                         .build())
@@ -78,14 +88,14 @@ public class StorageService {
      */
     public String generatePresignedDownloadUrl(String objectKey, Duration expiry) {
         if (props.isUseLocalStub()) {
-            log.info("[S3 STUB] presignedDownload bucket={} key={}", props.getS3Bucket(), objectKey);
-            return "http://localhost:4566/" + props.getS3Bucket() + "/" + objectKey + "?stub=download";
+            log.info("[STORAGE STUB] presignedDownload bucket={} key={}", props.getBucket(), objectKey);
+            return "http://localhost:4566/" + props.getBucket() + "/" + objectKey + "?stub=download";
         }
 
         GetObjectPresignRequest request = GetObjectPresignRequest.builder()
                 .signatureDuration(expiry)
                 .getObjectRequest(GetObjectRequest.builder()
-                        .bucket(props.getS3Bucket())
+                        .bucket(props.getBucket())
                         .key(objectKey)
                         .build())
                 .build();
@@ -105,16 +115,91 @@ public class StorageService {
      */
     public byte[] downloadObject(String objectKey) {
         if (props.isUseLocalStub()) {
-            log.info("[S3 STUB] downloadObject bucket={} key={}", props.getS3Bucket(), objectKey);
+            log.info("[STORAGE STUB] downloadObject bucket={} key={}", props.getBucket(), objectKey);
             return new byte[0];
         }
 
         ResponseBytes<GetObjectResponse> response = s3Client.getObjectAsBytes(
                 GetObjectRequest.builder()
-                        .bucket(props.getS3Bucket())
+                        .bucket(props.getBucket())
                         .key(objectKey)
                         .build());
         return response.asByteArray();
+    }
+
+    /**
+     * Verifies that an uploaded object actually conforms to its {@link UploadKind}'s
+     * size ceiling and MIME allow-list, and deletes it if it does not.
+     *
+     * <p>A pre-signed PUT cannot enforce a maximum size — the signature covers the
+     * key and content type, not the body length, so a client that has been handed a
+     * URL can upload a 5 GB file to it. The check therefore has to happen after the
+     * fact, at confirm time, against what is really in the bucket rather than what
+     * the client claimed. Anything out of bounds is deleted immediately, so a
+     * rejected upload cannot linger and bill us for storage.
+     *
+     * <p>Skipped in stub mode, where no object exists to inspect.
+     *
+     * <p>Returns what the object actually is, not what the client said it was.
+     * Callers persist these values rather than the request payload's — the whole
+     * point of the check is that the client's claims are not authoritative.
+     *
+     * @param objectKey the key the client has just uploaded to
+     * @param kind      the upload class whose limits apply
+     * @return the verified size and content type as reported by the bucket
+     * @throws ValidationException if the object is missing, too large, or of a
+     *                             content type outside the allow-list
+     */
+    public VerifiedObject verifyUploadedObject(String objectKey, UploadKind kind) {
+        if (props.isUseLocalStub()) {
+            log.info("[STORAGE STUB] verifyUploadedObject key={} kind={}", objectKey, kind);
+            return VerifiedObject.stub();
+        }
+
+        HeadObjectResponse head;
+        try {
+            head = s3Client.headObject(HeadObjectRequest.builder()
+                    .bucket(props.getBucket())
+                    .key(objectKey)
+                    .build());
+        } catch (NoSuchKeyException e) {
+            throw new ValidationException("No uploaded file was found. Please upload the file before confirming.");
+        }
+
+        long size = head.contentLength() == null ? 0L : head.contentLength();
+        if (size <= 0) {
+            deleteObject(objectKey);
+            throw new ValidationException("The uploaded file is empty.");
+        }
+        if (size > kind.getMaxBytes()) {
+            log.warn("Rejected oversized upload: key={} kind={} size={} max={}",
+                    objectKey, kind, size, kind.getMaxBytes());
+            deleteObject(objectKey);
+            throw new ValidationException("File exceeds the maximum size of " + kind.maxSizeLabel() + ".");
+        }
+        if (!kind.permits(head.contentType())) {
+            log.warn("Rejected upload with disallowed content type: key={} kind={} contentType={}",
+                    objectKey, kind, head.contentType());
+            deleteObject(objectKey);
+            throw new ValidationException(
+                    "Unsupported file type '" + UploadKind.normaliseContentType(head.contentType())
+                            + "'. Allowed: " + String.join(", ", kind.getAllowedContentTypes()) + ".");
+        }
+        return new VerifiedObject(size, UploadKind.normaliseContentType(head.contentType()));
+    }
+
+    /**
+     * What a verified object turned out to be, read back from the bucket.
+     *
+     * <p>In stub mode there is no object to inspect, so the size is zero and the
+     * content type null. Persisting those is correct — a stubbed upload genuinely
+     * has no verified size, and recording a fabricated one would make local rows
+     * indistinguishable from real ones.
+     */
+    public record VerifiedObject(long sizeBytes, String contentType) {
+        static VerifiedObject stub() {
+            return new VerifiedObject(0L, null);
+        }
     }
 
     /**
@@ -125,12 +210,12 @@ public class StorageService {
      */
     public void deleteObject(String objectKey) {
         if (props.isUseLocalStub()) {
-            log.info("[S3 STUB] deleteObject bucket={} key={}", props.getS3Bucket(), objectKey);
+            log.info("[STORAGE STUB] deleteObject bucket={} key={}", props.getBucket(), objectKey);
             return;
         }
 
         s3Client.deleteObject(DeleteObjectRequest.builder()
-                .bucket(props.getS3Bucket())
+                .bucket(props.getBucket())
                 .key(objectKey)
                 .build());
     }

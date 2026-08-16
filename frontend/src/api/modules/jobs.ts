@@ -10,8 +10,13 @@ import type {
 const BASE = "/api/v1/jobs";
 
 export const jobsApi = {
-  list: (params?: { page?: number; size?: number; status?: string }) =>
-    apiClient.get<Page<Job>>(BASE, { params }).then((r) => r.data),
+  /** `search` matches title or department, server-side across all pages. */
+  list: (params?: {
+    page?: number;
+    size?: number;
+    status?: string;
+    search?: string;
+  }) => apiClient.get<Page<Job>>(BASE, { params }).then((r) => r.data),
 
   get: (jobId: string) =>
     apiClient.get<Job>(`${BASE}/${jobId}`).then((r) => r.data),

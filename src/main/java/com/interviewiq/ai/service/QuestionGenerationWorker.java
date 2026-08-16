@@ -1,67 +1,94 @@
 package com.interviewiq.ai.service;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.interviewiq.candidate.domain.Candidate;
 import com.interviewiq.candidate.infrastructure.CandidateRepository;
+import com.interviewiq.job.domain.EmployerQuestion;
 import com.interviewiq.job.domain.JobOpening;
+import com.interviewiq.job.infrastructure.EmployerQuestionRepository;
+import com.interviewiq.ai.infrastructure.QuestionTelemetryRepository;
 import com.interviewiq.job.infrastructure.JobOpeningRepository;
 import com.interviewiq.session.domain.InterviewSession;
 import com.interviewiq.session.infrastructure.InterviewSessionRepository;
+import com.interviewiq.shared.config.WorkerProperties;
 import com.interviewiq.shared.domain.PipelineStatus;
+import com.interviewiq.shared.exception.AiServiceException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 /**
- * Scheduled worker that generates interview questions for sessions awaiting the
- * AI question pipeline.
+ * Stage 2 of question generation: assembles one candidate's question set from
+ * the opening's bank (PRD v2.1 §7.5, INTIQ-17).
  *
- * <h2>Input</h2>
+ * <h2>What changed, and why it matters</h2>
+ *
+ * <p>This worker used to generate a full question set per candidate from an
+ * inline prompt string, and validate the response only by checking it parsed.
+ * Three things were wrong with that:
+ *
  * <ul>
- *   <li><b>JD text</b> (required) — from {@link JobOpening#getJdText()}.
- *       Sessions are only created after {@code jdExtractionStatus == DONE}, so
- *       this is always available when this worker runs.
- *   <li><b>Resume text</b> (optional) — from {@link Candidate#getResumeText()}.
- *       If the resume extraction has not completed, questions are generated from
- *       the JD only (personalisation is treated as best-effort).
+ *   <li><strong>The prompt was inline.</strong> {@code question-generation.st}
+ *       existed and was never read — the one workflow INTIQ-75 named first was
+ *       the one still concatenating Java strings.</li>
+ *   <li><strong>The safety filter never ran on generated questions.</strong>
+ *       {@link QuestionSafetyFilter} was applied to employer-supplied questions
+ *       and to live follow-ups but not here, which is the case it was built for.
+ *       The prompt asks the model to avoid protected attributes; a prompt
+ *       instruction is a request, not a control.</li>
+ *   <li><strong>Every candidate cost a full generation call,</strong> and 25
+ *       candidates on one opening got 25 near-identical sets built from the same
+ *       JD — expensive and non-comparable at the same time.</li>
  * </ul>
  *
- * <h2>Output</h2>
- * <p>The LLM is prompted to return a JSON array of question objects. The raw
- * response string is validated as parseable JSON before being persisted to
- * {@link InterviewSession#setQuestionsJson(String)}.
+ * <p>All three are addressed by moving generation to the job level
+ * ({@link QuestionBankService}) and leaving this worker to assemble. The bank is
+ * template-driven and screened; assembly is pure code plus at most one small
+ * resume call.
  *
- * <h2>Failure handling</h2>
- * <p>Any exception during the OpenAI call (network, quota, invalid JSON) marks
- * the session {@code FAILED}. A separate retry mechanism is intentionally absent
- * — re-triggering is done by resetting the status externally (admin tooling or
- * a future retry endpoint).
+ * <h2>Waiting for the bank is not failing</h2>
+ *
+ * <p>A session whose opening has no bank yet is left {@code PENDING} rather than
+ * marked {@code FAILED}. The bank usually lands within seconds of the JD
+ * extracting, and failing a session for arriving slightly early would burn one
+ * of its attempts for a condition that resolves itself.
  */
 @Component
+@ConditionalOnProperty(name = "app.schedulers.enabled", havingValue = "true", matchIfMissing = true)
 public class QuestionGenerationWorker {
 
     private static final Logger log = LoggerFactory.getLogger(QuestionGenerationWorker.class);
 
-    private static final int TARGET_QUESTION_COUNT = 10;
-
     private final InterviewSessionRepository sessionRepository;
     private final JobOpeningRepository       jobOpeningRepository;
     private final CandidateRepository        candidateRepository;
+    private final EmployerQuestionRepository employerQuestionRepository;
+    private final WorkerProperties           workerProperties;
+    private final QuestionAssemblyService    assemblyService;
+    private final QuestionSafetyFilter       safetyFilter;
+    private final PromptTemplateService      prompts;
+    private final PiiRedactionService        piiRedaction;
     private final ChatClient                 chatClient;
+    private final QuestionTelemetryRepository telemetryRepository;
     private final ObjectMapper               objectMapper;
 
-    /**
-     * Self-reference injected lazily to route {@link #generateForSession} calls through
-     * the Spring AOP proxy, activating the {@code @Transactional} advice.
-     */
+    /** Self-reference so the transactional boundaries below actually apply. */
     @Lazy
     @Autowired
     private QuestionGenerationWorker self;
@@ -69,129 +96,237 @@ public class QuestionGenerationWorker {
     public QuestionGenerationWorker(InterviewSessionRepository sessionRepository,
                                     JobOpeningRepository jobOpeningRepository,
                                     CandidateRepository candidateRepository,
-                                    ChatClient chatClient,
+                                    EmployerQuestionRepository employerQuestionRepository,
+                                    WorkerProperties workerProperties,
+                                    QuestionAssemblyService assemblyService,
+                                    QuestionSafetyFilter safetyFilter,
+                                    PromptTemplateService prompts,
+                                    PiiRedactionService piiRedaction,
+                                    @Qualifier("questionChatClient") ChatClient chatClient,
+                                    QuestionTelemetryRepository telemetryRepository,
                                     ObjectMapper objectMapper) {
-        this.sessionRepository    = sessionRepository;
-        this.jobOpeningRepository = jobOpeningRepository;
-        this.candidateRepository  = candidateRepository;
-        this.chatClient           = chatClient;
-        this.objectMapper         = objectMapper;
+        this.sessionRepository          = sessionRepository;
+        this.jobOpeningRepository       = jobOpeningRepository;
+        this.candidateRepository        = candidateRepository;
+        this.employerQuestionRepository = employerQuestionRepository;
+        this.workerProperties           = workerProperties;
+        this.assemblyService            = assemblyService;
+        this.safetyFilter               = safetyFilter;
+        this.prompts                    = prompts;
+        this.piiRedaction               = piiRedaction;
+        this.chatClient                 = chatClient;
+        this.telemetryRepository        = telemetryRepository;
+        this.objectMapper               = objectMapper;
     }
 
     /**
-     * Poll for PENDING + IN_PROGRESS sessions and generate questions.
-     * Runs every 20 seconds after an initial 20-second warm-up.
-     *
-     * <p>IN_PROGRESS items are included for crash recovery. Safe because
-     * {@code fixedDelay} prevents concurrent scheduler runs within a single JVM.
+     * Claims a bounded, distinct batch per pod with {@code FOR UPDATE SKIP
+     * LOCKED} (§7.9), then assembles each set outside the claim's transaction.
      */
     @Scheduled(initialDelayString = "PT20S", fixedDelayString = "PT20S")
     public void generatePendingQuestions() {
-        List<InterviewSession> workItems =
-                sessionRepository.findAllByQuestionGenerationStatusIn(
-                        List.of(PipelineStatus.PENDING, PipelineStatus.IN_PROGRESS));
+        OffsetDateTime staleBefore =
+                OffsetDateTime.now(ZoneOffset.UTC).minus(workerProperties.getStaleClaimAfter());
 
-        if (workItems.isEmpty()) return;
+        List<InterviewSession> claimed = self.claim(staleBefore);
+        if (claimed.isEmpty()) {
+            return;
+        }
 
-        log.debug("QuestionGenerationWorker: processing {} session(s) (PENDING + IN_PROGRESS recovery)",
-                workItems.size());
-
-        for (InterviewSession session : workItems) {
-            self.generateForSession(session);  // call through proxy so @Transactional applies
+        log.debug("QuestionGenerationWorker: claimed {} session(s)", claimed.size());
+        for (InterviewSession session : claimed) {
+            assembleFor(session);
         }
     }
 
     @Transactional
-    public void generateForSession(InterviewSession session) {
-        // Mark IN_PROGRESS to prevent duplicate processing
-        session.setQuestionGenerationStatus(PipelineStatus.IN_PROGRESS);
-        sessionRepository.save(session);
-
-        try {
-            String questionsJson = callLlm(session);
-            session.setQuestionsJson(questionsJson);
-            session.setQuestionGenerationStatus(PipelineStatus.DONE);
-            sessionRepository.save(session);
-
-            log.info("QuestionGenerationWorker: generated questions for sessionId={}", session.getId());
-
-        } catch (Exception e) {
-            log.error("QuestionGenerationWorker: failed to generate questions for sessionId={}",
-                    session.getId(), e);
-            session.setQuestionGenerationStatus(PipelineStatus.FAILED);
-            sessionRepository.save(session);
-        }
-    }
-
-    private String callLlm(InterviewSession session) throws JsonProcessingException {
-        JobOpening job = jobOpeningRepository.findById(session.getJobOpeningId())
-                .orElseThrow(() -> new IllegalStateException(
-                        "JobOpening not found for sessionId=" + session.getId()));
-
-        Candidate candidate = candidateRepository.findById(session.getCandidateId())
-                .orElseThrow(() -> new IllegalStateException(
-                        "Candidate not found for sessionId=" + session.getId()));
-
-        String prompt = buildPrompt(job, candidate);
-
-        String rawResponse = chatClient.prompt()
-                .user(prompt)
-                .call()
-                .content();
-
-        // Validate JSON is parseable before persisting — prevents storing malformed data
-        validateJson(rawResponse, session.getId().toString());
-
-        return rawResponse;
-    }
-
-    private String buildPrompt(JobOpening job, Candidate candidate) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("You are an expert technical interviewer. Generate exactly ")
-          .append(TARGET_QUESTION_COUNT)
-          .append(" interview questions for the following role.\n\n");
-
-        sb.append("## Job Title\n").append(job.getTitle()).append("\n\n");
-
-        sb.append("## Job Description\n").append(job.getJdText()).append("\n\n");
-
-        String resumeText = candidate.getResumeText();
-        if (resumeText != null && !resumeText.isBlank()
-                && !resumeText.startsWith("[STUB]") && !resumeText.startsWith("[EMPTY]")) {
-            sb.append("## Candidate Resume\n").append(resumeText).append("\n\n");
-        } else {
-            sb.append("## Candidate Resume\n(Not available — generate questions from JD only)\n\n");
-        }
-
-        sb.append("""
-                ## Output Format
-                Return ONLY a valid JSON array with no additional text, markdown fences, or explanation.
-                Each element must follow this schema:
-                {
-                  "order": <integer 1-""").append(TARGET_QUESTION_COUNT).append("""
-                >,
-                  "text": "<the interview question>",
-                  "dimension": "<one of: TECHNICAL, COMMUNICATION, PROBLEM_SOLVING, RELEVANCE>",
-                  "expectedPoints": "<brief notes on what a good answer should cover>"
-                }
-                """);
-
-        return sb.toString();
+    public List<InterviewSession> claim(OffsetDateTime staleBefore) {
+        return sessionRepository.claimForQuestionGeneration(
+                workerProperties.getQuestionGenerationBatchSize(), staleBefore);
     }
 
     /**
-     * Verifies the LLM response is a parseable JSON array.
-     * Throws {@link IllegalStateException} if invalid — triggers FAILED status.
+     * Assembles one session's questions. Any model call happens here, outside a
+     * transaction.
      */
-    private void validateJson(String json, String sessionIdForLog) {
-        if (json == null || json.isBlank()) {
-            throw new IllegalStateException("LLM returned empty response for sessionId=" + sessionIdForLog);
-        }
+    private void assembleFor(InterviewSession session) {
         try {
-            objectMapper.readTree(json);
-        } catch (JsonProcessingException e) {
-            throw new IllegalStateException(
-                    "LLM returned non-JSON for sessionId=" + sessionIdForLog + ": " + e.getMessage(), e);
+            JobOpening job = jobOpeningRepository.findById(session.getJobOpeningId())
+                    .orElseThrow(() -> new AiServiceException(
+                            "JobOpening missing for session " + session.getId()));
+
+            if (job.getQuestionBankStatus() != PipelineStatus.DONE || job.getQuestionBankJsonb() == null) {
+                // The bank is still being generated. Release the claim back to
+                // PENDING rather than failing — this resolves itself in seconds
+                // and burning an attempt on it would be wrong.
+                self.releaseForRetry(session.getId());
+                log.debug("QuestionGenerationWorker: bank not ready for jobId={}, deferring sessionId={}",
+                        job.getId(), session.getId());
+                return;
+            }
+
+            Candidate candidate = candidateRepository.findById(session.getCandidateId())
+                    .orElseThrow(() -> new AiServiceException(
+                            "Candidate missing for session " + session.getId()));
+
+            List<String> employerQuestions = employerQuestionRepository
+                    .findAllByJobOpeningIdOrderByDisplayOrderAscCreatedAtAsc(job.getId())
+                    .stream()
+                    .filter(EmployerQuestion::isUsable)
+                    .map(EmployerQuestion::getQuestionText)
+                    .toList();
+
+            List<String> resumeQuestions = generateResumeQuestions(job, candidate, session);
+
+            // Retired questions leave the rotating pool. Fetched per session
+            // rather than cached, because the sweep runs between invites and a
+            // stale list would keep asking a question already judged useless.
+            List<String> retired = telemetryRepository.findRetiredQuestionIds(job.getId());
+
+            String questionsJson = assemblyService.assemble(
+                    job.getQuestionBankJsonb(),
+                    employerQuestions,
+                    resumeQuestions,
+                    session.getDurationTier(),
+                    candidate.getId(),
+                    retired);
+
+            self.recordSuccess(session.getId(), questionsJson, resumeQuestions.isEmpty());
+            log.info("QuestionGenerationWorker: assembled questions for sessionId={} resumeQuestions={}",
+                    session.getId(), resumeQuestions.size());
+
+        } catch (Exception e) {
+            log.error("QuestionGenerationWorker: assembly failed for sessionId={}", session.getId(), e);
+            self.recordFailure(session.getId());
         }
+    }
+
+    /**
+     * Generates the resume-anchored questions, or none when there is no résumé.
+     *
+     * <p>The résumé is PII-redacted before it leaves for the model (§7.10,
+     * INTIQ-36) — the questions are about what the candidate has done, not who
+     * they are, so their name and contact details have no business in the
+     * prompt.
+     *
+     * <p>Every returned question is screened. The résumé is free text supplied by
+     * the candidate, which makes this the one generation path where prompt
+     * content is partly attacker-controlled; the filter running afterwards is
+     * what makes that safe rather than merely unlikely to matter.
+     *
+     * <p>A failure here degrades to an empty list rather than failing the
+     * session. An interview drawn entirely from the bank is a worse interview;
+     * no interview at all is worse still.
+     */
+    private List<String> generateResumeQuestions(JobOpening job, Candidate candidate, InterviewSession session) {
+        String resumeText = candidate.getResumeText();
+        if (resumeText == null || resumeText.isBlank()
+                || resumeText.startsWith("[STUB]") || resumeText.startsWith("[EMPTY]")) {
+            return List.of();
+        }
+
+        try {
+            String redacted = piiRedaction.redact(resumeText);
+            int wanted = Math.max(1, session.getDurationTier().getQuestionCount() / 5);
+
+            String prompt = prompts.render(PromptTemplateService.QUESTION_GENERATION, Map.of(
+                    "jdText", job.getJdText() == null ? "" : job.getJdText(),
+                    "resumeText", redacted,
+                    "questionCount", wanted,
+                    "durationMinutes", session.getDurationTier().getMinutes(),
+                    "employerQuestions", List.of(),
+                    "candidateRef", candidate.getCandidateRef()));
+
+            String raw = chatClient.prompt().user(prompt).call().content();
+            return screenAll(parseTexts(raw), session.getId());
+
+        } catch (Exception e) {
+            log.warn("Resume-anchored question generation failed for sessionId={}; "
+                    + "continuing with bank questions only", session.getId(), e);
+            return List.of();
+        }
+    }
+
+    /** Drops anything the prohibited-topic filter refuses, logging each drop. */
+    private List<String> screenAll(List<String> questions, UUID sessionIdForLog) {
+        List<String> safe = new ArrayList<>(questions.size());
+        for (String q : questions) {
+            QuestionSafetyFilter.Verdict verdict = safetyFilter.screen(q);
+            if (verdict.approved()) {
+                safe.add(q);
+            } else {
+                log.warn("Resume question dropped by filter: sessionId={} category={} text={}",
+                        sessionIdForLog, verdict.prohibitedCategory(), q);
+            }
+        }
+        return safe;
+    }
+
+    private List<String> parseTexts(String raw) throws Exception {
+        String cleaned = raw == null ? "" : raw.strip();
+        if (cleaned.startsWith("```")) {
+            int firstNewline = cleaned.indexOf('\n');
+            int lastFence = cleaned.lastIndexOf("```");
+            if (firstNewline > 0 && lastFence > firstNewline) {
+                cleaned = cleaned.substring(firstNewline + 1, lastFence).strip();
+            }
+        }
+        JsonNode tree = objectMapper.readTree(cleaned);
+        List<String> texts = new ArrayList<>();
+        if (tree.isArray()) {
+            for (JsonNode n : tree) {
+                String text = n.path("text").asText("").strip();
+                if (!text.isEmpty()) {
+                    texts.add(text);
+                }
+            }
+        }
+        return texts;
+    }
+
+    // =========================================================================
+    // Terminal state writes, each in its own transaction
+    // =========================================================================
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void recordSuccess(UUID sessionId, String questionsJson, boolean resumeMissing) {
+        sessionRepository.findById(sessionId).ifPresent(session -> {
+            session.setQuestionsJson(questionsJson);
+            session.setQuestionGenerationStatus(PipelineStatus.DONE);
+            session.setResumeMissing(resumeMissing);
+            // Stamps the readiness gate (§7.4.3): "Start now" becomes available
+            // to the candidate the moment this is set.
+            session.setQuestionsReadyAt(OffsetDateTime.now(ZoneOffset.UTC));
+            sessionRepository.save(session);
+        });
+    }
+
+    /**
+     * Returns a session to {@code PENDING} so the next pass retries it.
+     *
+     * <p>Used when the opening's bank is not ready yet — a transient condition
+     * rather than a fault.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void releaseForRetry(UUID sessionId) {
+        sessionRepository.findById(sessionId).ifPresent(session -> {
+            session.setQuestionGenerationStatus(PipelineStatus.PENDING);
+            sessionRepository.save(session);
+        });
+    }
+
+    /**
+     * Marks the session failed in a fresh transaction.
+     *
+     * <p>{@code REQUIRES_NEW} for the reason INTIQ-81 documented: a failure
+     * marker written inside an already-doomed transaction never commits, so the
+     * session is re-claimed forever.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void recordFailure(UUID sessionId) {
+        sessionRepository.findById(sessionId).ifPresent(session -> {
+            session.setQuestionGenerationStatus(PipelineStatus.FAILED);
+            sessionRepository.save(session);
+        });
     }
 }

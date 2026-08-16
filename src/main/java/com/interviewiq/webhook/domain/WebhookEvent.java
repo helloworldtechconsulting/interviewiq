@@ -8,7 +8,7 @@ import java.time.ZoneOffset;
 import java.util.UUID;
 
 /**
- * Inbound webhook event from an external provider (Razorpay, Recall.ai, System).
+ * Inbound webhook event from an external provider (Razorpay, System).
  *
  * <p>{@code companyId} is nullable: some events arrive before company context is
  * resolved (e.g. Razorpay events matched asynchronously).

@@ -7,6 +7,7 @@ import com.interviewiq.session.service.SessionExpiryService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -22,7 +23,7 @@ import java.util.List;
  *
  * <p><b>Why not a bulk UPDATE:</b> a billing reservation is created the moment a
  * session is persisted in INVITED state ({@code SessionService.create}) — not when
- * it moves to STARTED. A single {@code UPDATE ... SET status = EXPIRED} would flip
+ * it moves to IN_PROGRESS. A single {@code UPDATE ... SET status = EXPIRED} would flip
  * the rows without ever calling {@link com.interviewiq.billing.service.WalletService#releaseFunds},
  * permanently stranding each session's cost in {@code reservedPaise}. Instead this job
  * fetches stale sessions a page at a time and expires-and-releases each one in its own
@@ -33,6 +34,7 @@ import java.util.List;
  * skipped without aborting the whole batch.
  */
 @Component
+@ConditionalOnProperty(name = "app.schedulers.enabled", havingValue = "true", matchIfMissing = true)
 public class SessionExpiryJob {
 
     private static final Logger log = LoggerFactory.getLogger(SessionExpiryJob.class);
@@ -63,8 +65,12 @@ public class SessionExpiryJob {
         int failed = 0;
 
         while (true) {
-            List<InterviewSession> batch = sessionRepository.findByStatusAndInviteExpiresAtBefore(
-                    SessionStatus.INVITED, now, PageRequest.of(0, PAGE_SIZE)).getContent();
+            // Both INVITED and SCHEDULED lapse. SCHEDULED is new in v2.1: a
+            // candidate who booked a time and never showed up still has an invite
+            // that expires, and their capacity buckets must be freed (§7.4.4).
+            List<InterviewSession> batch = sessionRepository.findByStatusInAndInviteExpiresAtBefore(
+                    List.of(SessionStatus.INVITED, SessionStatus.SCHEDULED),
+                    now, PageRequest.of(0, PAGE_SIZE)).getContent();
 
             if (batch.isEmpty()) {
                 break;

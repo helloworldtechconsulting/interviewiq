@@ -11,18 +11,26 @@ import com.interviewiq.company.domain.Company;
 import com.interviewiq.company.domain.CompanyStatus;
 import com.interviewiq.company.dto.CompanyOnboardRequest;
 import com.interviewiq.company.dto.CompanyProfileResponse;
+import com.interviewiq.company.dto.LogoUploadUrlResponse;
 import com.interviewiq.company.dto.OnboardResponse;
 import com.interviewiq.company.dto.UpdateCompanyRequest;
 import com.interviewiq.company.infrastructure.CompanyRepository;
 import com.interviewiq.shared.exception.ConflictException;
 import com.interviewiq.shared.exception.ResourceNotFoundException;
 import com.interviewiq.shared.security.SecurityContext;
+import com.interviewiq.storage.domain.StorageObjectType;
+import com.interviewiq.storage.domain.UploadKind;
+import com.interviewiq.storage.service.StorageObjectRecorder;
+import com.interviewiq.storage.service.StorageService;
+import com.interviewiq.storage.service.UploadKeyService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+
+import java.time.Duration;
 
 import java.util.UUID;
 
@@ -56,22 +64,37 @@ public class CompanyService {
 
     private static final Logger log = LoggerFactory.getLogger(CompanyService.class);
 
-    private final CompanyRepository companyRepository;
-    private final UserRepository    userRepository;
-    private final WalletRepository  walletRepository;
-    private final OtpService        otpService;
-    private final PasswordEncoder   passwordEncoder;
+    /** Logo upload URL valid for 15 minutes, matching the other upload paths. */
+    private static final Duration LOGO_UPLOAD_EXPIRY = Duration.ofMinutes(15);
+
+    /** Logo download URL valid for an hour — long enough to cache in the browser. */
+    private static final Duration LOGO_DOWNLOAD_EXPIRY = Duration.ofHours(1);
+
+    private final CompanyRepository       companyRepository;
+    private final UserRepository          userRepository;
+    private final WalletRepository        walletRepository;
+    private final OtpService              otpService;
+    private final PasswordEncoder         passwordEncoder;
+    private final StorageService          storageService;
+    private final UploadKeyService        uploadKeyService;
+    private final StorageObjectRecorder   storageObjectRecorder;
 
     public CompanyService(CompanyRepository companyRepository,
                           UserRepository userRepository,
                           WalletRepository walletRepository,
                           OtpService otpService,
-                          PasswordEncoder passwordEncoder) {
-        this.companyRepository = companyRepository;
-        this.userRepository    = userRepository;
-        this.walletRepository  = walletRepository;
-        this.otpService        = otpService;
-        this.passwordEncoder   = passwordEncoder;
+                          PasswordEncoder passwordEncoder,
+                          StorageService storageService,
+                          UploadKeyService uploadKeyService,
+                          StorageObjectRecorder storageObjectRecorder) {
+        this.companyRepository     = companyRepository;
+        this.userRepository        = userRepository;
+        this.walletRepository      = walletRepository;
+        this.otpService            = otpService;
+        this.passwordEncoder       = passwordEncoder;
+        this.storageService        = storageService;
+        this.uploadKeyService      = uploadKeyService;
+        this.storageObjectRecorder = storageObjectRecorder;
     }
 
     // =========================================================================
@@ -202,6 +225,76 @@ public class CompanyService {
         companyRepository.save(company);
         log.info("Company profile updated: companyId={}", companyId);
         return CompanyProfileResponse.from(company);
+    }
+
+    // =========================================================================
+    // Logo upload
+    // =========================================================================
+
+    /**
+     * Issues a pre-signed PUT URL for the company logo.
+     *
+     * <p>The logo is the one upload whose entity and tenant are the same thing, so
+     * the derived key is {@code logos/<companyId>/<companyId>/}. That looks
+     * redundant and is deliberately not special-cased: {@link UploadKeyService}
+     * validates keys by exact prefix, and carving out an exception for one kind is
+     * how prefix checks stop being reliable.
+     */
+    public LogoUploadUrlResponse generateLogoUploadUrl(String contentType) {
+        UUID companyId = SecurityContext.requireCompanyId();
+        String objectKey = uploadKeyService.deriveKey(
+                UploadKind.COMPANY_LOGO, companyId, companyId, contentType);
+        String uploadUrl = storageService.generatePresignedUploadUrl(objectKey, contentType, LOGO_UPLOAD_EXPIRY);
+        return new LogoUploadUrlResponse(uploadUrl, objectKey);
+    }
+
+    /**
+     * Confirms the logo upload and points the company at the new object.
+     *
+     * <p>Replacing a logo deletes the previous object rather than orphaning it. A
+     * company that re-uploads a logo ten times should not leave nine files in the
+     * bucket that nothing references and no retention rule will ever reach —
+     * unlike résumés or recordings, an old logo has no evidentiary value.
+     */
+    @Transactional
+    public CompanyProfileResponse confirmLogoUploaded(String objectKey) {
+        UUID companyId = SecurityContext.requireCompanyId();
+        Company company = requireById(companyId);
+
+        String ownedKey = uploadKeyService.validateOwnedKey(
+                UploadKind.COMPANY_LOGO, companyId, companyId, objectKey);
+        StorageService.VerifiedObject verified =
+                storageService.verifyUploadedObject(ownedKey, UploadKind.COMPANY_LOGO);
+        storageObjectRecorder.record(
+                companyId, companyId, StorageObjectType.COMPANY_LOGO, ownedKey, verified);
+
+        String previousKey = company.getLogoS3Key();
+        company.setLogoS3Key(ownedKey);
+        companyRepository.save(company);
+
+        if (previousKey != null && !previousKey.equals(ownedKey)) {
+            storageService.deleteObject(previousKey);
+        }
+
+        log.info("Company logo confirmed: companyId={} key={}", companyId, ownedKey);
+        return CompanyProfileResponse.from(company);
+    }
+
+    /**
+     * Returns a short-lived download URL for the logo, or {@code null} when the
+     * company has not uploaded one.
+     *
+     * <p>Separate from {@link #getProfile()} on purpose. Presigning is not free and
+     * the profile is read on nearly every page load, so minting a URL nobody looks
+     * at would be the common case rather than the exception.
+     */
+    @Transactional(readOnly = true)
+    public String getLogoDownloadUrl() {
+        Company company = requireById(SecurityContext.requireCompanyId());
+        if (company.getLogoS3Key() == null) {
+            return null;
+        }
+        return storageService.generatePresignedDownloadUrl(company.getLogoS3Key(), LOGO_DOWNLOAD_EXPIRY);
     }
 
     // =========================================================================

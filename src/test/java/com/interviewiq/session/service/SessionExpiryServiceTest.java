@@ -1,6 +1,7 @@
 package com.interviewiq.session.service;
 
 import com.interviewiq.billing.service.WalletService;
+import com.interviewiq.scheduling.service.CapacityService;
 import com.interviewiq.session.domain.InterviewSession;
 import com.interviewiq.session.domain.SessionStatus;
 import com.interviewiq.session.infrastructure.InterviewSessionRepository;
@@ -27,9 +28,10 @@ class SessionExpiryServiceTest {
 
     @Mock InterviewSessionRepository sessionRepository;
     @Mock WalletService walletService;
+    @Mock CapacityService capacityService;
 
     private SessionExpiryService service() {
-        return new SessionExpiryService(sessionRepository, walletService);
+        return new SessionExpiryService(sessionRepository, walletService, capacityService);
     }
 
     private InterviewSession session(UUID id, UUID companyId, SessionStatus status) {
@@ -45,7 +47,7 @@ class SessionExpiryServiceTest {
         UUID sessionId = UUID.randomUUID();
         UUID companyId = UUID.randomUUID();
         InterviewSession s = session(sessionId, companyId, SessionStatus.INVITED);
-        when(sessionRepository.findById(sessionId)).thenReturn(Optional.of(s));
+        when(sessionRepository.findByIdForUpdate(sessionId)).thenReturn(Optional.of(s));
 
         boolean acted = service().expireAndRelease(sessionId);
 
@@ -53,18 +55,66 @@ class SessionExpiryServiceTest {
         assertThat(s.getStatus()).isEqualTo(SessionStatus.EXPIRED);
         verify(sessionRepository).save(s);
         verify(walletService).releaseFunds(companyId, sessionId);
+
+        // An INVITED session was never booked into a time slot, so there is no
+        // capacity to give back. Releasing anyway would decrement a bucket this
+        // session never occupied and hand out a slot twice.
+        verifyNoInteractions(capacityService);
+    }
+
+    /**
+     * §7.4.4 — a candidate who booked a slot and never showed up still has an
+     * invite that lapses, and the slot they were holding has to go back.
+     *
+     * <p>SCHEDULED became expirable in v2.1. Without this path a no-show would
+     * permanently consume a capacity bucket: nothing else releases it, so the
+     * platform's bookable capacity would ratchet down with every no-show.
+     */
+    @Test
+    void scheduledSession_alsoReleasesTheCapacityBucketItHeld() {
+        UUID sessionId = UUID.randomUUID();
+        UUID companyId = UUID.randomUUID();
+        InterviewSession s = session(sessionId, companyId, SessionStatus.SCHEDULED);
+        when(sessionRepository.findByIdForUpdate(sessionId)).thenReturn(Optional.of(s));
+
+        boolean acted = service().expireAndRelease(sessionId);
+
+        assertThat(acted).isTrue();
+        assertThat(s.getStatus()).isEqualTo(SessionStatus.EXPIRED);
+        verify(walletService).releaseFunds(companyId, sessionId);
+        verify(capacityService).releaseForSession(sessionId);
+    }
+
+    /**
+     * The lock's whole purpose. Two pods can both select the same stale invite;
+     * the one that loses the race acquires the lock only after the winner has
+     * already written EXPIRED. It must not release the reservation a second
+     * time — that would credit the company for money it never reserved.
+     */
+    @Test
+    void aSessionAlreadyExpiredByAnotherPodIsNotReleasedTwice() {
+        UUID sessionId = UUID.randomUUID();
+        InterviewSession alreadyExpired = session(sessionId, UUID.randomUUID(), SessionStatus.EXPIRED);
+        when(sessionRepository.findByIdForUpdate(sessionId)).thenReturn(Optional.of(alreadyExpired));
+
+        boolean acted = service().expireAndRelease(sessionId);
+
+        assertThat(acted).isFalse();
+        verify(sessionRepository, never()).save(alreadyExpired);
+        verifyNoInteractions(walletService);
+        verifyNoInteractions(capacityService);
     }
 
     @Test
     void nonInvitedSession_isLeftUntouched() {
         UUID sessionId = UUID.randomUUID();
-        InterviewSession started = session(sessionId, UUID.randomUUID(), SessionStatus.STARTED);
-        when(sessionRepository.findById(sessionId)).thenReturn(Optional.of(started));
+        InterviewSession started = session(sessionId, UUID.randomUUID(), SessionStatus.IN_PROGRESS);
+        when(sessionRepository.findByIdForUpdate(sessionId)).thenReturn(Optional.of(started));
 
         boolean acted = service().expireAndRelease(sessionId);
 
         assertThat(acted).isFalse();
-        assertThat(started.getStatus()).isEqualTo(SessionStatus.STARTED);
+        assertThat(started.getStatus()).isEqualTo(SessionStatus.IN_PROGRESS);
         verify(sessionRepository, never()).save(started);
         verifyNoInteractions(walletService);
     }
@@ -72,7 +122,7 @@ class SessionExpiryServiceTest {
     @Test
     void vanishedSession_isNoOp() {
         UUID sessionId = UUID.randomUUID();
-        when(sessionRepository.findById(sessionId)).thenReturn(Optional.empty());
+        when(sessionRepository.findByIdForUpdate(sessionId)).thenReturn(Optional.empty());
 
         boolean acted = service().expireAndRelease(sessionId);
 
