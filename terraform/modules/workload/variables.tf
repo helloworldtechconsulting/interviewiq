@@ -71,11 +71,11 @@ variable "image" {
 
 variable "namespace" {
   type    = string
-  default = "interviewiq"
+  default = "interviewengine"
 }
 
 variable "api_host" {
-  description = "Public API hostname, e.g. api.interviewiq.in."
+  description = "Public API hostname, e.g. api.interviewengine.ai."
   type        = string
 }
 

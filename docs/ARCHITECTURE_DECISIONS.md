@@ -1,4 +1,4 @@
-# InterviewIQ — Revised Architecture Decisions
+# InterviewEngine — Revised Architecture Decisions
 
 **Date:** 1 August 2026
 **Supersedes** the single-box design in `BUILD_PLAN.md` §2. The phase sequencing in §3 of that document still stands; only the infrastructure target changes.
@@ -32,7 +32,7 @@ Fargate also directly answers your OS-patching requirement (§6) — there is no
 
 ### The honest counter-argument
 
-Hello World Tech Consulting lists **GKE/EKS/ArgoCD** as service offerings. If InterviewIQ doubles as a **reference implementation and sales asset** for the consulting business, running it on EKS with ArgoCD has value beyond the product itself — you'd be demoing your own stack.
+Hello World Tech Consulting lists **GKE/EKS/ArgoCD** as service offerings. If InterviewEngine doubles as a **reference implementation and sales asset** for the consulting business, running it on EKS with ArgoCD has value beyond the product itself — you'd be demoing your own stack.
 
 That's a legitimate business reason to spend $73/mo, and it's your call, not a technical question. My advice: **not yet.** Ship on Fargate, get paying customers, and if you later want the EKS showcase, the app is already containerised — migration is writing manifests, not rewriting code. Don't pay the Kubernetes tax before you have a Kubernetes problem.
 

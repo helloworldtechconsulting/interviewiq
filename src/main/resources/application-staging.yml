@@ -41,7 +41,7 @@ spring:
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
     hikari:
-      pool-name:          InterviewIQ-Staging-Pool
+      pool-name:          InterviewEngine-Staging-Pool
       maximum-pool-size:  10   # match production: 10 per pod (PRD v2.1 §8)
       minimum-idle:       3
 
@@ -68,7 +68,7 @@ spring:
 logging:
   level:
     root:                   INFO
-    com.interviewiq:        INFO
+    com.interviewengine:        INFO
     org.flywaydb:           INFO
     org.hibernate.SQL:      WARN
 
@@ -114,5 +114,5 @@ app:
 
   mail:
     from-address: ${MAIL_FROM_ADDRESS}
-    from-name:    ${MAIL_FROM_NAME:InterviewIQ}
+    from-name:    ${MAIL_FROM_NAME:InterviewEngine}
     use-local-stub: false

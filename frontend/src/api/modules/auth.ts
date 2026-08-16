@@ -13,7 +13,7 @@ import type {
   VerifyOtpRequest,
 } from "@/types";
 
-const DEFAULT_SLUG = import.meta.env.VITE_COMPANY_SLUG ?? "interviewiq-dev";
+const DEFAULT_SLUG = import.meta.env.VITE_COMPANY_SLUG ?? "interviewengine-dev";
 
 function base(slug?: string) {
   const resolved = typeof slug === "string" && slug.length > 0 ? slug : DEFAULT_SLUG;

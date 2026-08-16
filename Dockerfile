@@ -1,5 +1,5 @@
 # =============================================================================
-# Dockerfile — InterviewIQ Backend
+# Dockerfile — InterviewEngine Backend
 # Multi-stage build: Maven builder → slim JRE runner
 #
 # Stages
@@ -9,18 +9,18 @@
 #   3. runner   — minimal JRE image; copies only the JAR; runs as non-root
 #
 # Build
-#   docker build -t interviewiq-backend .
+#   docker build -t interviewengine-backend .
 #
 # Run (local smoke-test against a running Postgres)
 #   docker run --rm \
 #     -e SPRING_PROFILES_ACTIVE=prod \
 #     -e DB_HOST=host.docker.internal \
 #     -e DB_PORT=5432 \
-#     -e DB_NAME=interviewiq \
-#     -e DB_USERNAME=interviewiq \
+#     -e DB_NAME=interviewengine \
+#     -e DB_USERNAME=interviewengine \
 #     -e DB_PASSWORD=secret \
 #     -p 8080:8080 \
-#     interviewiq-backend
+#     interviewengine-backend
 # =============================================================================
 
 # ── Stage 1: dependency cache ─────────────────────────────────────────────────
@@ -48,9 +48,9 @@ RUN mvn package -DskipTests -B -q
 FROM eclipse-temurin:21-jre-alpine AS runner
 
 # ── Metadata ──────────────────────────────────────────────────────────────────
-LABEL org.opencontainers.image.title="InterviewIQ Backend" \
+LABEL org.opencontainers.image.title="InterviewEngine Backend" \
       org.opencontainers.image.description="AI-powered interview platform — Spring Boot 3.3 / Java 21" \
-      org.opencontainers.image.source="https://github.com/your-org/interviewiq"
+      org.opencontainers.image.source="https://github.com/your-org/interviewengine"
 
 # ── Security: non-root user ───────────────────────────────────────────────────
 # Running as root inside a container is unnecessary and increases blast radius.
@@ -62,7 +62,7 @@ WORKDIR /app
 # Copy the fat JAR from the builder stage.
 # The wildcard handles any version suffix (0.0.1-SNAPSHOT, 1.0.0, etc.)
 COPY --from=builder --chown=appuser:appgroup \
-     /build/target/interviewiq-backend-*.jar app.jar
+     /build/target/interviewengine-backend-*.jar app.jar
 
 USER appuser
 

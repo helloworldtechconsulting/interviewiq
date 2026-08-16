@@ -17,11 +17,11 @@ spring:
 
   # ── Database — matches docker-compose.yml credentials ─────────────────────
   datasource:
-    url:      jdbc:postgresql://localhost:5432/interviewiq_dev
-    username: interviewiq
-    password: interviewiq_secret
+    url:      jdbc:postgresql://localhost:5432/interviewengine_dev
+    username: interviewengine
+    password: interviewengine_secret
     hikari:
-      pool-name: InterviewIQ-Local-Pool
+      pool-name: InterviewEngine-Local-Pool
 
   # ── Flyway — local profile includes seed directory ────────────────────────
   #   classpath:db/migration  → V001–V026  (versioned migrations)
@@ -65,7 +65,7 @@ logging:
   file:
     name: backend-current.log
   level:
-    com.interviewiq:               DEBUG
+    com.interviewengine:               DEBUG
     org.flywaydb:                  DEBUG
     org.hibernate.SQL:             DEBUG
     org.hibernate.orm.jdbc.bind:   TRACE
@@ -99,5 +99,5 @@ app:
   # AWS — stub endpoint to prevent real S3/SES calls locally
   aws:
     region:           ap-south-1
-    s3-bucket:        interviewiq-dev-local
+    s3-bucket:        interviewengine-dev-local
     use-local-stub:   true

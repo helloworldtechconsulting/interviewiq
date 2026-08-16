@@ -1,4 +1,4 @@
-# InterviewIQ — Cost-Minimised Build Plan
+# InterviewEngine — Cost-Minimised Build Plan
 
 **Date:** 1 August 2026
 **Confirmed architecture:** April 2026 (in-browser WebRTC). The March 2026 PRD is superseded wherever the two conflict; it remains authoritative for billing rules, evaluation scoring, NFRs and personas.
@@ -65,11 +65,11 @@ Nothing in the evaluation pipeline consumes the video. It exists for a human to 
 ### 2.1 Shape
 
 ```
-                    Route 53  (interviewiq.in)
+                    Route 53  (interviewengine.ai)
                          │
         ┌────────────────┴────────────────┐
         │                                 │
-  app.interviewiq.in                api.interviewiq.in
+  app.interviewengine.ai                api.interviewengine.ai
         │                                 │
   CloudFront + ACM                   Elastic IP
         │                                 │

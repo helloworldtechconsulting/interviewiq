@@ -33,7 +33,7 @@ terraform {
 resource "oci_containerengine_cluster" "primary" {
   compartment_id     = var.compartment_id
   kubernetes_version = var.kubernetes_version
-  name               = "interviewiq-${var.environment}"
+  name               = "interviewengine-${var.environment}"
   vcn_id             = oci_core_vcn.vcn.id
 
   # BASIC_CLUSTER is the free control plane. ENHANCED_CLUSTER is billed and buys
@@ -58,7 +58,7 @@ resource "oci_containerengine_node_pool" "primary" {
   cluster_id         = oci_containerengine_cluster.primary.id
   compartment_id     = var.compartment_id
   kubernetes_version = var.kubernetes_version
-  name               = "interviewiq-${var.environment}-pool"
+  name               = "interviewengine-${var.environment}-pool"
 
   node_config_details {
     size = var.node_count
@@ -86,20 +86,20 @@ resource "oci_containerengine_node_pool" "primary" {
 resource "oci_core_vcn" "vcn" {
   compartment_id = var.compartment_id
   cidr_blocks    = ["10.30.0.0/16"]
-  display_name   = "interviewiq-${var.environment}"
+  display_name   = "interviewengine-${var.environment}"
   dns_label      = "iiq${substr(var.environment, 0, 4)}"
 }
 
 resource "oci_core_internet_gateway" "igw" {
   compartment_id = var.compartment_id
   vcn_id         = oci_core_vcn.vcn.id
-  display_name   = "interviewiq-${var.environment}"
+  display_name   = "interviewengine-${var.environment}"
 }
 
 resource "oci_core_route_table" "public" {
   compartment_id = var.compartment_id
   vcn_id         = oci_core_vcn.vcn.id
-  display_name   = "interviewiq-${var.environment}-public"
+  display_name   = "interviewengine-${var.environment}-public"
 
   route_rules {
     destination       = "0.0.0.0/0"
@@ -111,7 +111,7 @@ resource "oci_core_subnet" "nodes" {
   compartment_id = var.compartment_id
   vcn_id         = oci_core_vcn.vcn.id
   cidr_block     = "10.30.1.0/24"
-  display_name   = "interviewiq-${var.environment}-nodes"
+  display_name   = "interviewengine-${var.environment}-nodes"
   route_table_id = oci_core_route_table.public.id
   dns_label      = "nodes"
 }
@@ -120,7 +120,7 @@ resource "oci_core_subnet" "lb" {
   compartment_id = var.compartment_id
   vcn_id         = oci_core_vcn.vcn.id
   cidr_block     = "10.30.2.0/24"
-  display_name   = "interviewiq-${var.environment}-lb"
+  display_name   = "interviewengine-${var.environment}-lb"
   route_table_id = oci_core_route_table.public.id
   dns_label      = "lb"
 }
@@ -129,7 +129,7 @@ resource "oci_core_subnet" "api" {
   compartment_id = var.compartment_id
   vcn_id         = oci_core_vcn.vcn.id
   cidr_block     = "10.30.3.0/28"
-  display_name   = "interviewiq-${var.environment}-api"
+  display_name   = "interviewengine-${var.environment}-api"
   route_table_id = oci_core_route_table.public.id
   dns_label      = "k8sapi"
 }
@@ -142,7 +142,7 @@ resource "oci_core_subnet" "api" {
 resource "oci_psql_db_system" "postgres" {
   compartment_id = var.compartment_id
   db_version     = "16"
-  display_name   = "interviewiq-${var.environment}"
+  display_name   = "interviewengine-${var.environment}"
   shape          = var.db_shape
 
   instance_count              = 1
@@ -162,7 +162,7 @@ resource "oci_psql_db_system" "postgres" {
   }
 
   credentials {
-    username = "interviewiq"
+    username = "interviewengine"
     password_details {
       password_type = "PLAIN_TEXT"
       password      = random_password.db.result

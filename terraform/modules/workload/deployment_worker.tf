@@ -13,7 +13,7 @@
 
 resource "kubernetes_deployment_v1" "worker" {
   metadata {
-    name      = "interviewiq-worker"
+    name      = "interviewengine-worker"
     namespace = var.namespace
     labels    = merge(local.common_labels, { "app.kubernetes.io/component" = "worker" })
   }
@@ -22,7 +22,7 @@ resource "kubernetes_deployment_v1" "worker" {
     replicas = var.worker_min_replicas
 
     selector {
-      match_labels = { "app.kubernetes.io/component" = "worker", "app.kubernetes.io/name" = "interviewiq" }
+      match_labels = { "app.kubernetes.io/component" = "worker", "app.kubernetes.io/name" = "interviewengine" }
     }
 
     strategy {
@@ -39,10 +39,10 @@ resource "kubernetes_deployment_v1" "worker" {
       metadata {
         labels = merge(local.common_labels, { "app.kubernetes.io/component" = "worker" })
         annotations = {
-          "interviewiq.in/config-hash" = sha256(jsonencode(kubernetes_config_map_v1.app.data))
-          "prometheus.io/scrape"       = "true"
-          "prometheus.io/path"         = "/actuator/prometheus"
-          "prometheus.io/port"         = "8080"
+          "interviewengine.ai/config-hash" = sha256(jsonencode(kubernetes_config_map_v1.app.data))
+          "prometheus.io/scrape"           = "true"
+          "prometheus.io/path"             = "/actuator/prometheus"
+          "prometheus.io/port"             = "8080"
         }
       }
 
@@ -52,7 +52,7 @@ resource "kubernetes_deployment_v1" "worker" {
         termination_grace_period_seconds = 120
 
         container {
-          name  = "interviewiq"
+          name  = "interviewengine"
           image = var.image
 
           port {
@@ -155,7 +155,7 @@ resource "kubernetes_manifest" "worker_scaled_object" {
     apiVersion = "keda.sh/v1alpha1"
     kind       = "ScaledObject"
     metadata = {
-      name      = "interviewiq-worker"
+      name      = "interviewengine-worker"
       namespace = var.namespace
     }
     spec = {
@@ -188,7 +188,7 @@ resource "kubernetes_manifest" "worker_scaled_object" {
             connectionFromEnv = "KEDA_POSTGRES_CONNECTION"
           }
           authenticationRef = {
-            name = "interviewiq-postgres-auth"
+            name = "interviewengine-postgres-auth"
           }
         }
       ]
@@ -203,7 +203,7 @@ resource "kubernetes_manifest" "worker_trigger_auth" {
     apiVersion = "keda.sh/v1alpha1"
     kind       = "TriggerAuthentication"
     metadata = {
-      name      = "interviewiq-postgres-auth"
+      name      = "interviewengine-postgres-auth"
       namespace = var.namespace
     }
     spec = {

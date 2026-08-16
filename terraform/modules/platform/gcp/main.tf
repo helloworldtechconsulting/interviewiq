@@ -26,7 +26,7 @@ terraform {
 
 # ── Kubernetes: one ZONAL cluster (free control plane) ───────────────────────
 resource "google_container_cluster" "primary" {
-  name     = "interviewiq-${var.environment}"
+  name     = "interviewengine-${var.environment}"
   location = var.zone # zonal, not regional — regional control planes are billed
 
   # Terraform cannot create a cluster with no node pool, so the default is
@@ -59,7 +59,7 @@ resource "google_container_cluster" "primary" {
 }
 
 resource "google_container_node_pool" "primary" {
-  name       = "interviewiq-${var.environment}-pool"
+  name       = "interviewengine-${var.environment}-pool"
   cluster    = google_container_cluster.primary.id
   node_count = var.node_count
 
@@ -90,12 +90,12 @@ resource "google_container_node_pool" "primary" {
 
 # ── Network ──────────────────────────────────────────────────────────────────
 resource "google_compute_network" "vpc" {
-  name                    = "interviewiq-${var.environment}"
+  name                    = "interviewengine-${var.environment}"
   auto_create_subnetworks = false
 }
 
 resource "google_compute_subnetwork" "subnet" {
-  name          = "interviewiq-${var.environment}"
+  name          = "interviewengine-${var.environment}"
   ip_cidr_range = "10.20.0.0/20"
   region        = var.region
   network       = google_compute_network.vpc.id
@@ -105,13 +105,13 @@ resource "google_compute_subnetwork" "subnet" {
 
 # Private nodes need NAT for egress — LLM providers, Razorpay, SMTP.
 resource "google_compute_router" "router" {
-  name    = "interviewiq-${var.environment}"
+  name    = "interviewengine-${var.environment}"
   region  = var.region
   network = google_compute_network.vpc.id
 }
 
 resource "google_compute_router_nat" "nat" {
-  name                               = "interviewiq-${var.environment}"
+  name                               = "interviewengine-${var.environment}"
   router                             = google_compute_router.router.name
   region                             = var.region
   nat_ip_allocate_option             = "AUTO_ONLY"
@@ -123,7 +123,7 @@ resource "google_compute_router_nat" "nat" {
 # ~$15/month (PRD §6.2). CloudNativePG in-cluster remains the documented
 # fallback if a cloud's managed offering is poor.
 resource "google_sql_database_instance" "postgres" {
-  name             = "interviewiq-${var.environment}-${random_id.db_suffix.hex}"
+  name             = "interviewengine-${var.environment}-${random_id.db_suffix.hex}"
   database_version = "POSTGRES_16"
   region           = var.region
 
@@ -160,7 +160,7 @@ resource "google_sql_database_instance" "postgres" {
 }
 
 resource "google_compute_global_address" "private_ip" {
-  name          = "interviewiq-${var.environment}-db"
+  name          = "interviewengine-${var.environment}-db"
   purpose       = "VPC_PEERING"
   address_type  = "INTERNAL"
   prefix_length = 16
@@ -174,12 +174,12 @@ resource "google_service_networking_connection" "private_vpc" {
 }
 
 resource "google_sql_database" "app" {
-  name     = "interviewiq"
+  name     = "interviewengine"
   instance = google_sql_database_instance.postgres.name
 }
 
 resource "google_sql_user" "app" {
-  name     = "interviewiq"
+  name     = "interviewengine"
   instance = google_sql_database_instance.postgres.name
   password = random_password.db.result
 }

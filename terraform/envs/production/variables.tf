@@ -11,7 +11,7 @@ variable "zone" {
 }
 
 variable "zone_name" {
-  description = "Registered domain, e.g. interviewiq.in."
+  description = "Registered domain, e.g. interviewengine.ai."
   type        = string
 }
 

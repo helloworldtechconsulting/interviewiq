@@ -12,7 +12,7 @@
 
 resource "kubernetes_ingress_v1" "api" {
   metadata {
-    name      = "interviewiq-api"
+    name      = "interviewengine-api"
     namespace = var.namespace
     labels    = local.common_labels
 
@@ -52,7 +52,7 @@ resource "kubernetes_ingress_v1" "api" {
 
     tls {
       hosts       = [var.api_host]
-      secret_name = "interviewiq-api-tls"
+      secret_name = "interviewengine-api-tls"
     }
 
     rule {
@@ -98,7 +98,7 @@ resource "kubernetes_ingress_v1" "api" {
 
 resource "kubernetes_network_policy_v1" "web_ingress" {
   metadata {
-    name      = "interviewiq-web-ingress"
+    name      = "interviewengine-web-ingress"
     namespace = var.namespace
   }
 

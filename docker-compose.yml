@@ -1,25 +1,30 @@
 # =============================================================================
-# docker-compose.yml — InterviewIQ
+# docker-compose.yml — InterviewEngine
 #
 # Profiles
 #   (default / no profile)  — starts postgres only
 #                             Use this during local development when you run
 #                             the Spring Boot app from your IDE or Maven.
 #
-#   production              — starts postgres + the containerised app
+#   production              — starts postgres + the containerised app + frontend
 #                             docker compose --profile production up
 #
 # Quickstart (local dev)
 #   docker compose up -d
-#   mvn spring-boot:run -Dspring-boot.run.profiles=local
+#   ./mvnw spring-boot:run -Dspring-boot.run.profiles=local
 #
 # Quickstart (full stack)
-#   cp .env.example .env   # fill in real values
-#   docker compose --profile production up -d
+#   cp .env.example .env   # fill in every REQUIRED value
+#   docker compose --profile production up -d --build
 #
 # Environment variables
-#   Copy .env.example → .env and fill in every value.
-#   docker compose automatically reads .env from the project root.
+#   docker compose automatically reads .env from this directory. Spring Boot
+#   does NOT read .env — every value the app needs is passed through the
+#   `environment:` block below. A new placeholder added to any application-*.yml
+#   must also be added here, or the container fails to start on an
+#   unresolvable placeholder.
+#
+#   Verify before deploying:  docker compose --profile production config
 # =============================================================================
 
 services:
@@ -27,27 +32,32 @@ services:
   # ── PostgreSQL 15 ────────────────────────────────────────────────────────────
   postgres:
     image: postgres:15-alpine
-    container_name: interviewiq-postgres
+    container_name: interviewengine-postgres
     environment:
-      POSTGRES_DB:       ${DB_NAME:-interviewiq_dev}
-      POSTGRES_USER:     ${DB_USERNAME:-interviewiq}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-interviewiq_secret}
+      POSTGRES_DB:       ${DB_NAME:-interviewengine_dev}
+      POSTGRES_USER:     ${DB_USERNAME:-interviewengine}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-interviewengine_secret}
     ports:
       - "${DB_PORT_EXPOSED:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-interviewiq} -d ${DB_NAME:-interviewiq_dev}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-interviewengine} -d ${DB_NAME:-interviewengine_dev}"]
       interval: 5s
       timeout: 5s
       retries: 10
       start_period: 10s
     restart: unless-stopped
     networks:
-      - interviewiq-net
+      - interviewengine-net
 
   # ── Spring Boot Application ───────────────────────────────────────────────────
   # Only started when --profile production is passed.
+  #
+  # Single-process run: SPRING_PROFILES_ACTIVE=prod runs REST + WebSocket AND
+  # every scheduled worker in one container. To reproduce the Kubernetes
+  # web/worker split locally, run this service twice with `prod,web` and
+  # `prod,worker` (Implementation Architecture Decisions §4).
   app:
     profiles:
       - production
@@ -56,16 +66,18 @@ services:
       dockerfile: Dockerfile
       # Target the final runner stage (skip re-building the builder in prod)
       target: runner
-    container_name: interviewiq-app
-    image: interviewiq-backend:latest
+    container_name: interviewengine-app
+    image: interviewengine-backend:latest
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      SPRING_PROFILES_ACTIVE: prod
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
 
       # ── Database ──────────────────────────────────────────────────────────
-      # DB_HOST points to the postgres *service name* inside the compose network.
+      # DB_HOST points to the postgres *service name* inside the compose network,
+      # not to whatever DB_HOST is set to in .env (that value targets a managed
+      # instance in deployed environments).
       DB_HOST:     postgres
       DB_PORT:     5432
       DB_NAME:     ${DB_NAME}
@@ -74,27 +86,67 @@ services:
 
       # ── Security ──────────────────────────────────────────────────────────
       # PEM values must be single-line with literal \n for newlines, or use
-      # Docker secrets / a secrets manager in production.
+      # Docker secrets / a secrets manager in production. Blank values make
+      # TokenConfig generate a throwaway key pair on every boot.
       APP_SECURITY_JWT_PRIVATE_KEY_PEM: ${APP_SECURITY_JWT_PRIVATE_KEY_PEM}
       APP_SECURITY_JWT_PUBLIC_KEY_PEM:  ${APP_SECURITY_JWT_PUBLIC_KEY_PEM}
       APP_SECURITY_INVITE_SECRET:       ${APP_SECURITY_INVITE_SECRET}
+      # Comma-separated exact origins. No wildcard fallback exists — an unlisted
+      # origin is refused and the SPA cannot call the API.
+      APP_SECURITY_CORS_ALLOWED_ORIGINS: ${APP_SECURITY_CORS_ALLOWED_ORIGINS}
 
-      # ── OpenAI ────────────────────────────────────────────────────────────
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      # ── AI providers ──────────────────────────────────────────────────────
+      # Both starters are on the classpath and both need a key at startup —
+      # vendor is per-workflow config (app.ai.*), not a build-time choice.
+      OPENAI_API_KEY:    ${OPENAI_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      # The cheap-provider escape hatch (application.yml). Most low-cost
+      # providers speak the OpenAI wire protocol, so pointing OPENAI_BASE_URL at
+      # DeepSeek / Groq / Together / OpenRouter / a local vLLM moves every
+      # OpenAI-shaped workflow across with no code change. Note PRD §10: the
+      # protocol being compatible does not make the jurisdiction acceptable.
+      OPENAI_BASE_URL:    ${OPENAI_BASE_URL:-https://api.openai.com}
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-https://api.anthropic.com}
 
       # ── Razorpay ──────────────────────────────────────────────────────────
       RAZORPAY_KEY_ID:     ${RAZORPAY_KEY_ID}
       RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET}
 
-      # ── AWS ───────────────────────────────────────────────────────────────
-      AWS_REGION:            ${AWS_REGION:-ap-south-1}
-      AWS_S3_BUCKET:         ${AWS_S3_BUCKET}
-      AWS_ACCESS_KEY_ID:     ${AWS_ACCESS_KEY_ID}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      # ── Object storage — S3-compatible ────────────────────────────────────
+      # Endpoint override selects the provider: empty = real AWS S3; set it for
+      # R2 / GCS interop / Spaces / MinIO. Blank access keys fall through to the
+      # SDK's default credential chain (IAM role).
+      OBJECT_STORAGE_BUCKET:     ${OBJECT_STORAGE_BUCKET}
+      OBJECT_STORAGE_REGION:     ${OBJECT_STORAGE_REGION:-ap-south-1}
+      OBJECT_STORAGE_ENDPOINT:   ${OBJECT_STORAGE_ENDPOINT:-}
+      OBJECT_STORAGE_ACCESS_KEY: ${OBJECT_STORAGE_ACCESS_KEY:-}
+      OBJECT_STORAGE_SECRET_KEY: ${OBJECT_STORAGE_SECRET_KEY:-}
+
+      # ── Email ─────────────────────────────────────────────────────────────
+      # SMTP transport (Resend / Brevo / Postmark / SES-over-SMTP). STARTTLS is
+      # required — port 465 implicit TLS will not connect.
+      SMTP_HOST:     ${SMTP_HOST}
+      SMTP_PORT:     ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS}
+      MAIL_FROM_NAME:    ${MAIL_FROM_NAME:-InterviewEngine}
+      # Bounce / complaint callbacks. Blank means bounces are accepted with
+      # HTTP 200 and silently ignored — no suppression, no log line.
+      MAIL_WEBHOOK_PROVIDER:         ${MAIL_WEBHOOK_PROVIDER:-}
+      MAIL_WEBHOOK_SECRET:           ${MAIL_WEBHOOK_SECRET:-}
+      MAIL_WEBHOOK_SIGNATURE_HEADER: ${MAIL_WEBHOOK_SIGNATURE_HEADER:-X-Webhook-Signature}
 
       # ── Application ───────────────────────────────────────────────────────
-      APP_FRONTEND_BASE_URL:          ${APP_FRONTEND_BASE_URL:-https://app.interviewiq.ai}
-      APP_BILLING_SESSION_COST_PAISE: ${APP_BILLING_SESSION_COST_PAISE:-5000}
+      # Every emailed link is built from APP_FRONTEND_BASE_URL. A wrong value
+      # silently emails dead links.
+      APP_FRONTEND_BASE_URL:          ${APP_FRONTEND_BASE_URL}
+      APP_BILLING_SESSION_COST_PAISE: ${APP_BILLING_SESSION_COST_PAISE:-10000}
+
+      # ── Observability ─────────────────────────────────────────────────────
+      # 0.0 = traceId/spanId still reach the JSON logs, nothing is exported.
+      TRACING_SAMPLE_RATE: ${TRACING_SAMPLE_RATE:-0.0}
+      OTLP_ENDPOINT:       ${OTLP_ENDPOINT:-http://localhost:4318/v1/traces}
 
       # ── JVM ───────────────────────────────────────────────────────────────
       JAVA_OPTS: >-
@@ -116,10 +168,14 @@ services:
           memory: 1g        # Guard against runaway heap; tune with MaxRAMPercentage
     restart: unless-stopped
     networks:
-      - interviewiq-net
+      - interviewengine-net
 
   # ── React Frontend (Nginx) ────────────────────────────────────────────────────
   # Only started when --profile production is passed.
+  #
+  # Every VITE_* value is BUILD-time: Vite inlines it into the bundle, so
+  # changing one requires a rebuild (`--build`), not a restart. They are build
+  # args, not environment entries, for exactly that reason.
   frontend:
     profiles:
       - production
@@ -127,9 +183,16 @@ services:
       context: frontend
       dockerfile: Dockerfile
       args:
-        VITE_API_BASE_URL: ""   # Empty = Nginx proxies /api to the app container
-    container_name: interviewiq-frontend
-    image: interviewiq-frontend:latest
+        # Empty = Nginx proxies /api to the app container on the same origin.
+        VITE_API_BASE_URL: "${VITE_API_BASE_URL:-}"
+        # Tenant slug used in every auth path: /api/v1/{slug}/auth/*
+        # MUST be set for a real deployment — the default points at the dev seed
+        # tenant and auth will silently target the wrong company.
+        VITE_COMPANY_SLUG: "${VITE_COMPANY_SLUG:-interviewengine-dev}"
+        # Google OAuth 2.0 Client ID; blank disables the Google sign-in button.
+        VITE_GOOGLE_CLIENT_ID: "${VITE_GOOGLE_CLIENT_ID:-}"
+    container_name: interviewengine-frontend
+    image: interviewengine-frontend:latest
     depends_on:
       app:
         condition: service_healthy
@@ -137,18 +200,18 @@ services:
       - "${FRONTEND_PORT:-3000}:80"
     restart: unless-stopped
     networks:
-      - interviewiq-net
+      - interviewengine-net
 
 # ── Volumes ───────────────────────────────────────────────────────────────────
 volumes:
   postgres_data:
-    name: interviewiq-postgres-data
+    name: interviewengine-postgres-data
 
 # ── Networks ──────────────────────────────────────────────────────────────────
 # Explicit bridge network so postgres and app can resolve each other by service
 # name (app connects to "postgres:5432") while being isolated from other compose
 # projects on the same host.
 networks:
-  interviewiq-net:
+  interviewengine-net:
     driver: bridge
-    name: interviewiq-network
+    name: interviewengine-network

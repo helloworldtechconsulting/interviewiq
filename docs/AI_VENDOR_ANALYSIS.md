@@ -1,4 +1,4 @@
-# InterviewIQ — AI Provider Selection: Cost-Benefit Analysis
+# InterviewEngine — AI Provider Selection: Cost-Benefit Analysis
 
 **Date:** 1 August 2026 · **Revised 16 August 2026** (reprice + provider-agnostic implementation)
 
@@ -154,7 +154,7 @@ If a specific enterprise customer later *demands* in-country inference, that's a
 
 You're right, and it's a materially safer position than auto-rejection. Two things follow.
 
-**It reduces legal exposure — make that explicit rather than implicit.** Put it in the product and the contract: the score is advisory, InterviewIQ performs no automated rejection, a human makes every decision. India has no direct analogue to NYC Local Law 144 yet, but the **EU AI Act classifies employment-screening AI as high-risk** — relevant the day you sell to an Indian company with EU operations. A one-line disclaimer on the report page and a clause in the MSA cost nothing now and are expensive to retrofit.
+**It reduces legal exposure — make that explicit rather than implicit.** Put it in the product and the contract: the score is advisory, InterviewEngine performs no automated rejection, a human makes every decision. India has no direct analogue to NYC Local Law 144 yet, but the **EU AI Act classifies employment-screening AI as high-risk** — relevant the day you sell to an Indian company with EU operations. A one-line disclaimer on the report page and a clause in the MSA cost nothing now and are expensive to retrofit.
 
 **It does not reduce the accuracy requirement.** The score *is* the product. If recruiters can't act on it, they stop paying — and your own PRD makes AI-score-to-hire correlation (Pearson r > 0.65) a launch KPI. "The human decides" protects you legally; it doesn't protect the business case. That's precisely why §3.1 spends ₹900 to answer the vendor question with data rather than a guess.
 

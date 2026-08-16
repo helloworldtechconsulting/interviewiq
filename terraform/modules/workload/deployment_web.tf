@@ -33,16 +33,16 @@ locals {
   )
 
   common_labels = {
-    "app.kubernetes.io/name"       = "interviewiq"
-    "app.kubernetes.io/part-of"    = "interviewiq"
-    "app.kubernetes.io/managed-by" = "terraform"
-    "interviewiq.in/environment"   = var.environment
+    "app.kubernetes.io/name"         = "interviewengine"
+    "app.kubernetes.io/part-of"      = "interviewengine"
+    "app.kubernetes.io/managed-by"   = "terraform"
+    "interviewengine.ai/environment" = var.environment
   }
 }
 
 resource "kubernetes_deployment_v1" "web" {
   metadata {
-    name      = "interviewiq-web"
+    name      = "interviewengine-web"
     namespace = var.namespace
     labels    = merge(local.common_labels, { "app.kubernetes.io/component" = "web" })
   }
@@ -51,7 +51,7 @@ resource "kubernetes_deployment_v1" "web" {
     replicas = var.web_min_replicas
 
     selector {
-      match_labels = { "app.kubernetes.io/component" = "web", "app.kubernetes.io/name" = "interviewiq" }
+      match_labels = { "app.kubernetes.io/component" = "web", "app.kubernetes.io/name" = "interviewengine" }
     }
 
     strategy {
@@ -69,10 +69,10 @@ resource "kubernetes_deployment_v1" "web" {
         labels = merge(local.common_labels, { "app.kubernetes.io/component" = "web" })
         annotations = {
           # Roll pods when configuration changes, not only when the image does.
-          "interviewiq.in/config-hash" = sha256(jsonencode(kubernetes_config_map_v1.app.data))
-          "prometheus.io/scrape"       = "true"
-          "prometheus.io/path"         = "/actuator/prometheus"
-          "prometheus.io/port"         = "8080"
+          "interviewengine.ai/config-hash" = sha256(jsonencode(kubernetes_config_map_v1.app.data))
+          "prometheus.io/scrape"           = "true"
+          "prometheus.io/path"             = "/actuator/prometheus"
+          "prometheus.io/port"             = "8080"
         }
       }
 
@@ -94,7 +94,7 @@ resource "kubernetes_deployment_v1" "web" {
         }
 
         container {
-          name  = "interviewiq"
+          name  = "interviewengine"
           image = var.image
 
           port {
@@ -210,7 +210,7 @@ resource "kubernetes_deployment_v1" "web" {
 
 resource "kubernetes_pod_disruption_budget_v1" "web" {
   metadata {
-    name      = "interviewiq-web"
+    name      = "interviewengine-web"
     namespace = var.namespace
   }
   spec {
@@ -223,12 +223,12 @@ resource "kubernetes_pod_disruption_budget_v1" "web" {
 
 resource "kubernetes_service_v1" "web" {
   metadata {
-    name      = "interviewiq-web"
+    name      = "interviewengine-web"
     namespace = var.namespace
     labels    = local.common_labels
   }
   spec {
-    selector = { "app.kubernetes.io/component" = "web", "app.kubernetes.io/name" = "interviewiq" }
+    selector = { "app.kubernetes.io/component" = "web", "app.kubernetes.io/name" = "interviewengine" }
     port {
       name        = "http"
       port        = 80
@@ -248,7 +248,7 @@ resource "kubernetes_service_v1" "web" {
 
 resource "kubernetes_horizontal_pod_autoscaler_v2" "web" {
   metadata {
-    name      = "interviewiq-web"
+    name      = "interviewengine-web"
     namespace = var.namespace
   }
 

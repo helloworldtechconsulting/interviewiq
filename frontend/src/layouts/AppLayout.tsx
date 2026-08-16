@@ -44,7 +44,7 @@ const navItems = [
 ];
 
 /**
- * Shown only to InterviewIQ staff. Hiding the link is a courtesy, not a
+ * Shown only to InterviewEngine staff. Hiding the link is a courtesy, not a
  * control — every endpoint behind it is PLATFORM_STAFF-gated server-side.
  */
 const staffNavItems = [
@@ -81,7 +81,7 @@ export function AppLayout() {
           <BrainCircuit className="h-6 w-6 shrink-0 text-primary" />
           {sidebarOpen && (
             <span className="text-base font-bold tracking-tight">
-              InterviewIQ
+              InterviewEngine
             </span>
           )}
         </div>

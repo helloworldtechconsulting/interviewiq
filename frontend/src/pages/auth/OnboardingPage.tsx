@@ -105,7 +105,7 @@ export function OnboardingPage() {
       authApi.googleRegister(idToken, companyName),
     onSuccess(data) {
       authStore.getState().setAccessToken(data.accessToken);
-      toast.success("Account created! Welcome to InterviewIQ.");
+      toast.success("Account created! Welcome to InterviewEngine.");
       navigate("/app/dashboard", { replace: true });
     },
     onError(error) {

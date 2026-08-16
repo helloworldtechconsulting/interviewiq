@@ -36,7 +36,7 @@ committed one is a credential in the repository.
 ### 2. Run
 
 ```bash
-./mvnw gatling:test -Pload-test -Dload.baseUrl=https://api-staging.interviewiq.in -Dload.concurrentInterviews=25
+./mvnw gatling:test -Pload-test -Dload.baseUrl=https://api-staging.interviewengine.ai -Dload.concurrentInterviews=25
 ```
 
 Tunables, all optional:
@@ -69,7 +69,7 @@ The number being measured is on the pods, so watch Grafana during the run:
    product could ship" — a disconnect under steady load is a smaller version of
    the same failure.
 
-4. **`interviewiq_evaluation_queue_oldest_age_seconds`.** Twenty-five
+4. **`interviewengine_evaluation_queue_oldest_age_seconds`.** Twenty-five
    interviews finishing within a few minutes of each other is the worst case
    for the evaluation pipeline. If KEDA does not scale workers fast enough to
    keep this under the 30-minute SLA, the worker maximum is too low.
