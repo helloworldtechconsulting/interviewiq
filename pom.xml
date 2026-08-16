@@ -55,7 +55,7 @@
         <docker.api.version>1.44</docker.api.version>
 
         <!-- AWS SDK v2 BOM version -->
-        <aws.sdk.version>2.26.12</aws.sdk.version>
+        <aws.sdk.version>2.52.1</aws.sdk.version>
 
         <!-- JWT -->
         <jjwt.version>0.12.6</jjwt.version>
