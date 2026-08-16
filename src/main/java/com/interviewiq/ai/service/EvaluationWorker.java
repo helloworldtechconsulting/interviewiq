@@ -1,182 +1,301 @@
 package com.interviewiq.ai.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.interviewiq.ai.domain.HiringRecommendation;
 import com.interviewiq.session.domain.EvaluationReport;
 import com.interviewiq.session.domain.InterviewSession;
-import com.interviewiq.session.domain.SessionStatus;
 import com.interviewiq.session.infrastructure.EvaluationReportRepository;
 import com.interviewiq.session.infrastructure.InterviewSessionRepository;
-import com.interviewiq.session.service.SessionCompletionService;
-import com.interviewiq.ai.config.AiWorkflowProperties;
-import com.interviewiq.shared.config.WorkerProperties;
 import com.interviewiq.shared.domain.PipelineStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
 import java.util.List;
 
 /**
- * Claims and runs pending evaluations (PRD v2.1 §7.5.5, §7.9).
+ * Scheduled worker that drives the AI evaluation pipeline for completed interview sessions.
  *
- * <p>This class is responsible for <em>claiming and retrying</em>;
- * {@link EvaluationService} is responsible for producing a report. Keeping them
- * apart matters because a report that fails the evidence requirement is a
- * retryable outcome, and mixing that with attempt bookkeeping is how attempt
- * counters go wrong.
+ * <h2>Trigger</h2>
+ * <p>When the candidate's browser submits {@code POST /api/v1/candidate/interview/complete},
+ * {@code SessionService.completeInterview()} transitions the session to {@code COMPLETED} and
+ * resets the {@code EvaluationReport.generationStatus} to {@code PENDING}.
+ * This worker picks up those PENDING reports on the next poll cycle.
  *
- * <h2>Timing</h2>
+ * <h2>Input to the LLM</h2>
+ * <p>The {@code questionsJson} field on the session contains both the pre-generated questions
+ * and the candidate's spoken transcripts (merged by {@code SessionService.completeInterview}).
+ * Each question object has the shape:
+ * <pre>
+ * {
+ *   "order": 1,
+ *   "text": "Tell me about yourself",
+ *   "dimension": "COMMUNICATION",
+ *   "answer": "I have five years of Java experience..."   ← added by browser
+ * }
+ * </pre>
  *
- * <p>The 30-second poll is a crash-recovery safety net, not the primary trigger.
- * Completion queues the report immediately (§7.5.5), so a recruiter watching a
- * candidate finish does not wait for a tick. The hard SLA is 30 minutes and the
- * soft target ~5, and the PRD is pointed that the longer SLA is "a promise we can
- * always keep, not a delay we deliberately introduce".
+ * <p>This eliminates the Recall.ai transcript dependency entirely — no external API
+ * calls are needed to fetch the transcript.
  *
- * <h2>Settlement</h2>
+ * <h2>Output</h2>
+ * <p>The LLM returns a structured JSON with per-dimension scores and an overall
+ * recommendation. Scalar scores are extracted from JSON and written to dedicated
+ * typed columns for aggregation (SQL {@code AVG}, {@code ORDER BY}).
  *
- * <p>₹100 settles only when the report is ready, via
- * {@link SessionCompletionService#markReportReady}. A session whose evaluation
- * permanently fails reaches {@code ERROR} and is never charged — an employer pays
- * for a readable report, not for an interview that failed to score.
+ * <h2>Max attempts</h2>
+ * <p>Each invocation increments {@code generationAttempts}. Once the attempt count
+ * reaches {@code app.ai.evaluation-max-attempts} (default: 3), the report is
+ * permanently marked {@code FAILED} to prevent infinite retry loops.
  */
 @Component
-@ConditionalOnProperty(name = "app.schedulers.enabled", havingValue = "true", matchIfMissing = true)
 public class EvaluationWorker {
 
     private static final Logger log = LoggerFactory.getLogger(EvaluationWorker.class);
 
-    private final EvaluationReportRepository reportRepository;
-    private final InterviewSessionRepository sessionRepository;
-    private final EvaluationService evaluationService;
-    private final SessionCompletionService completionService;
-    private final WorkerProperties workerProperties;
-    private final AiWorkflowProperties aiProperties;
+    @Value("${app.ai.evaluation-max-attempts:3}")
+    private int maxAttempts;
 
-    /** Self-reference so {@code @Transactional} advice applies to per-report calls. */
+    private final EvaluationReportRepository  evaluationReportRepository;
+    private final InterviewSessionRepository  sessionRepository;
+    private final ChatClient                  chatClient;
+    private final ObjectMapper                objectMapper;
+
+    /**
+     * Self-reference injected lazily to route {@link #evaluateSingle} calls through
+     * the Spring AOP proxy, activating the {@code @Transactional} advice.
+     */
     @Lazy
     @Autowired
     private EvaluationWorker self;
 
-    public EvaluationWorker(EvaluationReportRepository reportRepository,
+    public EvaluationWorker(EvaluationReportRepository evaluationReportRepository,
                             InterviewSessionRepository sessionRepository,
-                            EvaluationService evaluationService,
-                            SessionCompletionService completionService,
-                            WorkerProperties workerProperties,
-                            AiWorkflowProperties aiProperties) {
-        this.reportRepository  = reportRepository;
-        this.sessionRepository = sessionRepository;
-        this.evaluationService = evaluationService;
-        this.completionService = completionService;
-        this.workerProperties  = workerProperties;
-        this.aiProperties      = aiProperties;
+                            ChatClient chatClient,
+                            ObjectMapper objectMapper) {
+        this.evaluationReportRepository = evaluationReportRepository;
+        this.sessionRepository          = sessionRepository;
+        this.chatClient                 = chatClient;
+        this.objectMapper               = objectMapper;
     }
 
     /**
-     * Claims a bounded batch and evaluates each report.
+     * Poll for PENDING + IN_PROGRESS evaluation reports and run the AI evaluation.
+     * Runs every 30 seconds with an initial 25-second warm-up.
      *
-     * <p>The claim is a single atomic statement using {@code FOR UPDATE SKIP
-     * LOCKED} with an explicit {@code LIMIT}, which increments the attempt
-     * counter under the same row lock (§7.9). Rows come back already marked
-     * IN_PROGRESS, so this scheduler never sweeps IN_PROGRESS rows for recovery —
-     * staleness is handled inside the claim.
+     * <p>IN_PROGRESS items are included for crash recovery. Safe because
+     * {@code fixedDelay} prevents concurrent scheduler runs within a single JVM.
      */
     @Scheduled(initialDelayString = "PT25S", fixedDelayString = "PT30S")
     public void evaluatePendingReports() {
-        OffsetDateTime staleBefore =
-                OffsetDateTime.now(ZoneOffset.UTC).minus(workerProperties.getStaleClaimAfter());
+        List<EvaluationReport> workItems =
+                evaluationReportRepository.findAllByGenerationStatusIn(
+                        List.of(PipelineStatus.PENDING, PipelineStatus.IN_PROGRESS));
 
-        List<EvaluationReport> claimed = reportRepository.claimBatch(
-                workerProperties.getEvaluationBatchSize(), staleBefore);
+        if (workItems.isEmpty()) return;
 
-        if (claimed.isEmpty()) {
-            return;
-        }
-        log.debug("EvaluationWorker: claimed {} evaluation(s)", claimed.size());
+        log.debug("EvaluationWorker: processing {} evaluation(s) (PENDING + IN_PROGRESS recovery)",
+                workItems.size());
 
-        for (EvaluationReport report : claimed) {
-            self.evaluateSingle(report);  // through the proxy so @Transactional applies
+        for (EvaluationReport report : workItems) {
+            self.evaluateSingle(report);  // call through proxy so @Transactional applies
         }
     }
 
-    /**
-     * Evaluates one already-claimed report.
-     *
-     * <p>The attempt counter was incremented by the claim, under the row lock, so
-     * this must not increment it again — doing so would retire reports at half
-     * the configured limit.
-     */
     @Transactional
     public void evaluateSingle(EvaluationReport report) {
-        int attempt = report.getGenerationAttempts();
-        int maxAttempts = aiProperties.getEvaluationMaxAttempts();
+        int attempt = report.getGenerationAttempts() + 1;
+        report.setGenerationAttempts(attempt);
 
         if (attempt > maxAttempts) {
-            failPermanently(report, "Evaluation did not succeed after " + maxAttempts + " attempts.");
+            log.warn("EvaluationWorker: max attempts ({}) exceeded for reportId={}, marking FAILED",
+                    maxAttempts, report.getId());
+            report.setGenerationStatus(PipelineStatus.FAILED);
+            evaluationReportRepository.save(report);
             return;
         }
 
-        InterviewSession session = sessionRepository.findById(report.getSessionId()).orElse(null);
-        if (session == null) {
-            failPermanently(report, "The session for this report no longer exists.");
-            return;
+        // Mark IN_PROGRESS
+        report.setGenerationStatus(PipelineStatus.IN_PROGRESS);
+        evaluationReportRepository.save(report);
+
+        try {
+            InterviewSession session = sessionRepository.findById(report.getSessionId())
+                    .orElseThrow(() -> new IllegalStateException(
+                            "Session not found for reportId=" + report.getId()));
+
+            String evaluationJson = callLlm(session, report);
+
+            applyScores(report, evaluationJson);
+            report.setEvaluationJson(evaluationJson);
+            report.setGenerationStatus(PipelineStatus.DONE);
+            evaluationReportRepository.save(report);
+
+            log.info("EvaluationWorker: evaluation complete for sessionId={} reportId={}",
+                    session.getId(), report.getId());
+
+        } catch (Exception e) {
+            log.error("EvaluationWorker: attempt {} failed for reportId={}", attempt, report.getId(), e);
+            // Revert to PENDING so next poll can retry (up to maxAttempts)
+            report.setGenerationStatus(PipelineStatus.PENDING);
+            evaluationReportRepository.save(report);
+        }
+    }
+
+    // =========================================================================
+    // Private helpers
+    // =========================================================================
+
+    private String callLlm(InterviewSession session, EvaluationReport report) throws JsonProcessingException {
+        String questionsJson = session.getQuestionsJson();
+        String prompt        = buildEvaluationPrompt(questionsJson);
+
+        String rawResponse = chatClient.prompt()
+                .user(prompt)
+                .call()
+                .content();
+
+        validateJson(rawResponse, report.getId().toString());
+        return rawResponse;
+    }
+
+    /**
+     * Builds the evaluation prompt from the session's {@code questionsJson}.
+     *
+     * <p>The questions JSON contains both the pre-generated questions and the
+     * candidate's spoken answers (merged during session completion).
+     *
+     * <p>If a question's {@code "answer"} field is absent or empty (e.g. the
+     * candidate skipped a question or the STT engine returned nothing), the
+     * evaluator will treat it as a blank answer.
+     */
+    private String buildEvaluationPrompt(String questionsJson) {
+        String qaSection = formatQuestionsForPrompt(questionsJson);
+
+        return """
+                You are an expert interview evaluator. Evaluate the following AI-conducted interview.
+
+                The interview was conducted in-browser using text-to-speech (questions) and
+                speech-to-text (candidate answers via Web Speech API).
+
+                ## Questions and Candidate Answers
+                """ + qaSection + """
+
+                ## Scoring Instructions
+                Score each dimension on a 0–10 integer scale:
+                - technical: depth and accuracy of technical answers
+                - communication: clarity, structure, and articulation
+                - relevance: how well answers address the questions asked
+                - problem_solving: analytical thinking and structured reasoning
+
+                Compute overall_score as an integer 0–100 weighted composite:
+                  overall = (technical * 3 + communication * 2 + relevance * 3 + problem_solving * 2)
+
+                If a candidate's answer is blank or very short, score that question's dimensions low.
+                Choose recommendation from: STRONG_HIRE, HIRE, NO_HIRE, STRONG_NO_HIRE
+
+                ## Output Format
+                Return ONLY a valid JSON object with no additional text, markdown fences, or explanation:
+                {
+                  "overall_score": <integer 0-100>,
+                  "technical_score": <integer 0-10>,
+                  "communication_score": <integer 0-10>,
+                  "relevance_score": <integer 0-10>,
+                  "problem_solving_score": <integer 0-10>,
+                  "recommendation": "<STRONG_HIRE|HIRE|NO_HIRE|STRONG_NO_HIRE>",
+                  "summary": "<2-3 sentence overall assessment>",
+                  "strengths": ["<strength 1>", "<strength 2>"],
+                  "areas_for_improvement": ["<area 1>", "<area 2>"]
+                }
+                """;
+    }
+
+    private String formatQuestionsForPrompt(String questionsJson) {
+        if (questionsJson == null || questionsJson.isBlank()) {
+            return "[NO QUESTIONS AVAILABLE — question generation may not have completed]";
         }
 
         try {
-            evaluationService.evaluate(session, report);
-
-            report.setGeneratedAt(OffsetDateTime.now(ZoneOffset.UTC));
-            report.setGenerationStatus(PipelineStatus.DONE);
-            reportRepository.save(report);
-
-            // Only now does the session reach COMPLETED and the Rs.100 settle.
-            completionService.markReportReady(session.getId());
-
-            log.info("Evaluation complete: sessionId={} reportId={} attempt={} score={}",
-                    session.getId(), report.getId(), attempt, report.getOverallScore());
-
-        } catch (Exception e) {
-            if (attempt >= maxAttempts) {
-                failPermanently(report, e.getMessage());
-                return;
+            JsonNode questions = objectMapper.readTree(questionsJson);
+            if (!questions.isArray() || questions.isEmpty()) {
+                return questionsJson;
             }
-            // Back to PENDING so the next claim retries. The claim increments the
-            // attempt counter again, which is what bounds this loop.
-            log.warn("Evaluation attempt {}/{} failed for reportId={}: {}",
-                    attempt, maxAttempts, report.getId(), e.getMessage());
-            report.setGenerationStatus(PipelineStatus.PENDING);
-            reportRepository.save(report);
+
+            StringBuilder sb = new StringBuilder();
+            for (JsonNode q : questions) {
+                int order = q.path("order").asInt();
+                String text = q.path("text").asText("");
+                String answer = q.path("answer").asText("").strip();
+                String dimension = q.path("dimension").asText("");
+
+                sb.append("Q").append(order);
+                if (!dimension.isBlank()) sb.append(" [").append(dimension).append("]");
+                sb.append(": ").append(text).append("\n");
+                sb.append("A: ");
+                if (answer.isBlank()) {
+                    sb.append("[No answer provided]");
+                } else {
+                    sb.append(answer);
+                }
+                sb.append("\n\n");
+            }
+            return sb.toString().strip();
+
+        } catch (JsonProcessingException e) {
+            log.warn("EvaluationWorker: could not parse questionsJson for formatting — using raw JSON");
+            return questionsJson;
         }
     }
 
     /**
-     * Retires a report and flags its session for manual review.
-     *
-     * <p>§7.5.5: "on persistent failure the session is flagged ERROR for manual
-     * review and the employer is notified." The session never reaches COMPLETED,
-     * so the ₹100 reservation is never settled — the employer is not charged for
-     * a report they cannot read.
+     * Extracts scalar scores from the LLM JSON response and applies them to the
+     * {@link EvaluationReport} entity fields used for DB aggregation.
      */
-    private void failPermanently(EvaluationReport report, String reason) {
-        report.setGenerationStatus(PipelineStatus.FAILED);
-        reportRepository.save(report);
+    private void applyScores(EvaluationReport report, String evaluationJson) {
+        try {
+            JsonNode node = objectMapper.readTree(evaluationJson);
 
-        sessionRepository.findById(report.getSessionId()).ifPresent(session -> {
-            if (session.getStatus() == SessionStatus.EVALUATING) {
-                session.setStatus(SessionStatus.ERROR);
-                session.setErrorCode("EVALUATION_FAILED");
-                session.setErrorMessage(reason);
-                sessionRepository.save(session);
+            report.setOverallScore(safeShort(node, "overall_score"));
+            report.setTechnicalScore(safeShort(node, "technical_score"));
+            report.setCommunicationScore(safeShort(node, "communication_score"));
+            report.setRelevanceScore(safeShort(node, "relevance_score"));
+            report.setProblemSolvingScore(safeShort(node, "problem_solving_score"));
+
+            String rec = node.path("recommendation").asText("");
+            if (!rec.isBlank()) {
+                try {
+                    report.setRecommendation(HiringRecommendation.valueOf(rec));
+                } catch (IllegalArgumentException e) {
+                    log.warn("EvaluationWorker: unknown recommendation '{}', leaving null", rec);
+                }
             }
-        });
+        } catch (JsonProcessingException e) {
+            log.warn("EvaluationWorker: could not parse evaluation JSON for scores, leaving nulls: {}", e.getMessage());
+        }
+    }
 
-        log.error("Evaluation permanently failed: reportId={} sessionId={} reason={}",
-                report.getId(), report.getSessionId(), reason);
+    private Short safeShort(JsonNode node, String field) {
+        JsonNode v = node.path(field);
+        return v.isMissingNode() || v.isNull() ? null : v.shortValue();
+    }
+
+    private void validateJson(String json, String reportIdForLog) {
+        if (json == null || json.isBlank()) {
+            throw new IllegalStateException("LLM returned empty response for reportId=" + reportIdForLog);
+        }
+        try {
+            objectMapper.readTree(json);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException(
+                    "LLM returned non-JSON for reportId=" + reportIdForLog + ": " + e.getMessage(), e);
+        }
     }
 }

@@ -225,7 +225,7 @@ export function SettingsPage() {
                 <Avatar className="h-24 w-24">
                   {(logoPreview ?? company?.logoS3Key) && (
                     <AvatarImage
-                      src={logoPreview ?? company?.logoS3Key ?? undefined}
+                      src={logoPreview ?? company?.logoS3Key}
                       alt={company?.name}
                     />
                   )}

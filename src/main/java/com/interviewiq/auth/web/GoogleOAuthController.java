@@ -42,7 +42,6 @@ public class GoogleOAuthController {
     private final TokenService        tokenService;
     private final RefreshTokenRepository refreshTokenRepository;
     private final com.interviewiq.auth.config.SecurityProperties securityProperties;
-    private final RefreshTokenCookie  refreshTokenCookie;
 
     public GoogleOAuthController(GoogleOAuthService googleOAuthService,
                                  AuthService authService,
@@ -51,8 +50,7 @@ public class GoogleOAuthController {
                                  WalletRepository walletRepository,
                                  TokenService tokenService,
                                  RefreshTokenRepository refreshTokenRepository,
-                                 com.interviewiq.auth.config.SecurityProperties securityProperties,
-                                 RefreshTokenCookie refreshTokenCookie) {
+                                 com.interviewiq.auth.config.SecurityProperties securityProperties) {
         this.googleOAuthService      = googleOAuthService;
         this.authService             = authService;
         this.userRepository          = userRepository;
@@ -61,26 +59,13 @@ public class GoogleOAuthController {
         this.tokenService            = tokenService;
         this.refreshTokenRepository  = refreshTokenRepository;
         this.securityProperties      = securityProperties;
-        this.refreshTokenCookie      = refreshTokenCookie;
-    }
-
-    /**
-     * Sets the refresh cookie and returns a body that omits the token.
-     * Mirrors AuthController.issue — Google sign-in must not be the one path
-     * that leaks a refresh token into JavaScript's reach (PRD v2.1 §7.1.1).
-     */
-    private ApiResponse<AuthResponse> issue(AuthResponse.WithRefreshToken issued,
-                                            jakarta.servlet.http.HttpServletResponse httpResponse) {
-        refreshTokenCookie.set(httpResponse, issued.refreshToken());
-        return ApiResponse.ok(issued.response());
     }
 
     @PostMapping("/api/v1/{slug}/auth/google")
     @Transactional
     public ApiResponse<AuthResponse> googleLogin(
             @PathVariable String slug,
-            @Valid @RequestBody GoogleAuthRequest request,
-            jakarta.servlet.http.HttpServletResponse httpResponse) {
+            @Valid @RequestBody GoogleAuthRequest request) {
 
         Payload payload = googleOAuthService.verify(request.idToken());
 
@@ -128,15 +113,14 @@ public class GoogleOAuthController {
         user.setLastLoginAt(OffsetDateTime.now(ZoneOffset.UTC));
         userRepository.save(user);
 
-        return issue(issueTokenPair(user), httpResponse);
+        return ApiResponse.ok(issueTokenPair(user));
     }
 
     @PostMapping("/api/v1/auth/google/register")
     @ResponseStatus(HttpStatus.CREATED)
     @Transactional
     public ApiResponse<AuthResponse> googleRegister(
-            @Valid @RequestBody GoogleRegisterRequest request,
-            jakarta.servlet.http.HttpServletResponse httpResponse) {
+            @Valid @RequestBody GoogleRegisterRequest request) {
 
         Payload payload = googleOAuthService.verify(request.idToken());
 
@@ -181,12 +165,10 @@ public class GoogleOAuthController {
         log.info("Company registered via Google OAuth: companyId={} slug={} adminEmail={}",
                 company.getId(), slug, email);
 
-        AuthResponse.WithRefreshToken issued = issueTokenPair(admin);
-        refreshTokenCookie.set(httpResponse, issued.refreshToken());
-        return ApiResponse.created(issued.response());
+        return ApiResponse.created(issueTokenPair(admin));
     }
 
-    private AuthResponse.WithRefreshToken issueTokenPair(User user) {
+    private AuthResponse issueTokenPair(User user) {
         String accessToken = tokenService.generateAccessToken(user);
         String rawRefresh  = tokenService.generateRefreshToken();
 
@@ -197,9 +179,8 @@ public class GoogleOAuthController {
                 .plus(securityProperties.getJwt().getRefreshTokenExpiration()));
         refreshTokenRepository.save(rt);
 
-        return new AuthResponse.WithRefreshToken(
-                new AuthResponse(accessToken, com.interviewiq.auth.dto.UserResponse.from(user)),
-                rawRefresh);
+        return new AuthResponse(accessToken, rawRefresh,
+                com.interviewiq.auth.dto.UserResponse.from(user));
     }
 
     private String resolveUniqueSlug(String base) {

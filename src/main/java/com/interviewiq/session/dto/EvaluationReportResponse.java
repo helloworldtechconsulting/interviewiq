@@ -19,8 +19,6 @@ public record EvaluationReportResponse(
         HiringRecommendation recommendation,
         PipelineStatus       generationStatus,
         String               evaluationJson,
-        /** The recruiter's own notes (INTIQ-29). Never used in scoring. */
-        String               employerNotes,
         OffsetDateTime       createdAt,
         OffsetDateTime       updatedAt
 ) {
@@ -37,7 +35,6 @@ public record EvaluationReportResponse(
                 r.getRecommendation(),
                 r.getGenerationStatus(),
                 r.getEvaluationJson(),
-                r.getEmployerNotes(),
                 r.getCreatedAt(),
                 r.getUpdatedAt()
         );

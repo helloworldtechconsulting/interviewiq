@@ -22,9 +22,6 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
-import org.springframework.web.cors.CorsConfiguration;
-import org.springframework.web.cors.CorsConfigurationSource;
-import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import java.time.Duration;
 
@@ -88,14 +85,10 @@ public class SecurityConfig {
 
     private final TokenService tokenService;
     private final ObjectMapper objectMapper;
-    private final SecurityProperties securityProperties;
 
-    public SecurityConfig(TokenService tokenService,
-                          ObjectMapper objectMapper,
-                          SecurityProperties securityProperties) {
+    public SecurityConfig(TokenService tokenService, ObjectMapper objectMapper) {
         this.tokenService = tokenService;
         this.objectMapper = objectMapper;
-        this.securityProperties = securityProperties;
     }
 
     // =========================================================================
@@ -117,7 +110,6 @@ public class SecurityConfig {
         return http
                 .securityMatcher("/api/v1/candidate/**")
                 .csrf(AbstractHttpConfigurer::disable)
-                .cors(c -> c.configurationSource(corsConfigurationSource()))
                 .sessionManagement(sm ->
                         sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth ->
@@ -145,7 +137,7 @@ public class SecurityConfig {
      * <p>Public paths:
      * <ul>
      *   <li>{@code /api/v1/auth/**} — login, register, OTP, Google OAuth, password reset</li>
-     *   <li>{@code /api/v1/webhooks/**} — Razorpay + SMTP bounce callbacks; HMAC-verified at service layer</li>
+     *   <li>{@code /api/v1/webhooks/**} — Razorpay + Recall.ai; HMAC-verified at service layer</li>
      *   <li>{@code /actuator/health}, {@code /actuator/info} — load-balancer probes</li>
      * </ul>
      */
@@ -163,10 +155,9 @@ public class SecurityConfig {
                 onboardRateLimitRefillDuration, objectMapper);
 
         return http
-                .securityMatcher("/api/v1/**", "/actuator/**", "/internal/**",
-                        "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html")
+                .securityMatcher("/api/v1/**", "/actuator/**", "/v3/api-docs/**",
+                        "/swagger-ui/**", "/swagger-ui.html")
                 .csrf(AbstractHttpConfigurer::disable)
-                .cors(c -> c.configurationSource(corsConfigurationSource()))
                 .sessionManagement(sm ->
                         sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
@@ -175,29 +166,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/companies/register").permitAll()
                         .requestMatchers("/api/v1/companies/check-slug").permitAll()
                         .requestMatchers("/api/v1/webhooks/**").permitAll()
-                        // /actuator/health/** and not just /actuator/health.
-                        // requestMatchers does not match sub-paths, so the
-                        // liveness and readiness groups the Kubernetes probes
-                        // actually call (see deployment_web.tf) were returning
-                        // 401. A probe treats anything outside 2xx/3xx as a
-                        // failure, so no pod would ever have become ready and
-                        // no rollout would ever have completed.
-                        //
-                        // /actuator/prometheus for the same reason on the
-                        // scrape path: the monitoring stack would have
-                        // collected nothing.
-                        //
-                        // Safe to permit for the same documented reason as
-                        // /internal/** below: the ingress routes only /ws and
-                        // /api, so nothing under /actuator is reachable from
-                        // outside the cluster.
-                        .requestMatchers("/actuator/health/**", "/actuator/info", "/actuator/prometheus").permitAll()
-                        // Kubernetes probes and the preStop drain hook. Reachable
-                        // only from inside the cluster — /internal/** is not
-                        // exposed through the ingress (see the workload module),
-                        // which is what keeps an unauthenticated drain endpoint
-                        // from being a denial-of-service lever.
-                        .requestMatchers("/internal/**").permitAll()
+                        .requestMatchers("/actuator/health", "/actuator/info").permitAll()
                         // OpenAPI / Swagger UI — permit in all environments; restrict in prod via network policy
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         .anyRequest().authenticated())
@@ -227,37 +196,6 @@ public class SecurityConfig {
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder(12);
-    }
-
-    /**
-     * CORS policy shared by both chains, built from {@code app.security.cors}.
-     *
-     * <p>PRD v2.1 §7.1.3 makes an absent or permissive CORS policy a launch
-     * blocker. Origins are an explicit allow-list — there is no wildcard path
-     * through this method. {@code allowCredentials} is on because the refresh
-     * token is carried in an HTTP-only cookie (§7.1.1), and the CORS
-     * specification forbids combining credentials with an {@code *} origin, so
-     * enumerating origins is the only configuration that can work.
-     *
-     * <p>An empty allow-list yields a policy that permits no cross-origin
-     * request. That is the correct default: same-origin deployments need
-     * nothing, and anything else must be declared.
-     */
-    @Bean
-    public CorsConfigurationSource corsConfigurationSource() {
-        SecurityProperties.Cors cors = securityProperties.getCors();
-
-        CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(cors.getAllowedOrigins());
-        config.setAllowedMethods(cors.getAllowedMethods());
-        config.setAllowedHeaders(cors.getAllowedHeaders());
-        config.setExposedHeaders(cors.getExposedHeaders());
-        config.setAllowCredentials(true);
-        config.setMaxAge(cors.getMaxAge());
-
-        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        source.registerCorsConfiguration("/api/**", config);
-        return source;
     }
 
     // =========================================================================

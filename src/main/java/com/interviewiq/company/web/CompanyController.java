@@ -2,7 +2,6 @@ package com.interviewiq.company.web;
 
 import com.interviewiq.company.dto.CompanyOnboardRequest;
 import com.interviewiq.company.dto.CompanyProfileResponse;
-import com.interviewiq.company.dto.LogoUploadUrlResponse;
 import com.interviewiq.company.dto.OnboardResponse;
 import com.interviewiq.company.dto.UpdateCompanyRequest;
 import com.interviewiq.company.service.CompanyService;
@@ -23,7 +22,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -113,47 +111,5 @@ public class CompanyController {
     public ApiResponse<CompanyProfileResponse> updateProfile(
             @Valid @RequestBody UpdateCompanyRequest request) {
         return ApiResponse.ok(companyService.updateProfile(request));
-    }
-
-    // =========================================================================
-    // Logo
-    // =========================================================================
-
-    /**
-     * GET /api/v1/companies/me/logo-upload-url?contentType=image/png
-     *
-     * <p>ADMIN only, on the same reasoning as profile updates: the logo appears on
-     * candidate-facing invite emails and the interview room, so it is brand
-     * surface rather than a personal setting.
-     */
-    @GetMapping("/me/logo-upload-url")
-    @PreAuthorize("hasRole('ADMIN')")
-    public ApiResponse<LogoUploadUrlResponse> getLogoUploadUrl(
-            @RequestParam
-            @NotBlank(message = "contentType is required.")
-            String contentType) {
-        return ApiResponse.ok(companyService.generateLogoUploadUrl(contentType));
-    }
-
-    /** POST /api/v1/companies/me/logo-upload-confirm */
-    @PostMapping("/me/logo-upload-confirm")
-    @PreAuthorize("hasRole('ADMIN')")
-    public ApiResponse<CompanyProfileResponse> confirmLogoUpload(
-            @RequestBody Map<String, String> body) {
-        return ApiResponse.ok(companyService.confirmLogoUploaded(body.get("objectKey")));
-    }
-
-    /**
-     * GET /api/v1/companies/me/logo-url
-     *
-     * <p>Returns {@code {"logoUrl": null}} when no logo has been uploaded, rather
-     * than 404 — "this company has no logo" is a normal answer, not a missing
-     * resource, and a 404 here would make every client special-case it.
-     */
-    @GetMapping("/me/logo-url")
-    public ApiResponse<Map<String, String>> getLogoUrl() {
-        Map<String, String> body = new HashMap<>();
-        body.put("logoUrl", companyService.getLogoDownloadUrl());
-        return ApiResponse.ok(body);
     }
 }

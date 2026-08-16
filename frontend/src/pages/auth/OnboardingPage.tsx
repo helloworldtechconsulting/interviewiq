@@ -104,7 +104,7 @@ export function OnboardingPage() {
     mutationFn: ({ idToken, companyName }: { idToken: string; companyName: string }) =>
       authApi.googleRegister(idToken, companyName),
     onSuccess(data) {
-      authStore.getState().setAccessToken(data.accessToken);
+      authStore.getState().setTokens(data.accessToken, data.refreshToken);
       toast.success("Account created! Welcome to InterviewIQ.");
       navigate("/app/dashboard", { replace: true });
     },

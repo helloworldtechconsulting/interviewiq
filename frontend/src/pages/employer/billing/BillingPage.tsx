@@ -30,7 +30,6 @@ import { queryKeys } from "@/lib/queryKeys";
 import { AppError } from "@/api/client";
 import { useAuthUser } from "@/stores/authStore";
 import { PageHeader } from "@/components/common/PageHeader";
-import { WalletBalance } from "@/components/common/WalletBalance";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -289,9 +288,7 @@ export function BillingPage() {
   const totalPages = txPage?.totalPages ?? 0;
 
   const txLabel: Record<TransactionType, string> = {
-    PROMO_CREDIT: "Promotional credit",
-  PROMO_EXPIRY: "Promotional credit expired",
-  TOPUP: "Wallet Top-up",
+    TOPUP: "Wallet Top-up",
     RESERVATION: "Session Reserved",
     SETTLEMENT: "Interview Session",
     RELEASE: "Reservation Released",
@@ -328,7 +325,15 @@ export function BillingPage() {
             {walletLoading ? (
               <div className="h-9 w-32 animate-pulse rounded bg-muted" />
             ) : (
-              wallet && <WalletBalance wallet={wallet} />
+              <>
+                <p className="text-3xl font-bold">
+                  {wallet ? formatRupees(wallet.balancePaise) : "—"}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  ~{wallet ? Math.floor(wallet.balancePaise / 5000) : 0} sessions
+                  remaining
+                </p>
+              </>
             )}
             <Button
               className="mt-4 w-full"

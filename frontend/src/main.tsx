@@ -8,11 +8,12 @@ import { Toaster } from "sonner";
 import "./index.css";
 import { router } from "@/router";
 import { queryClient } from "@/lib/queryClient";
+import { authStore } from "@/stores/authStore";
 import { AuthProvider } from "@/components/common/AuthProvider";
 
-// No storage hydration step: the refresh token lives in an HTTP-only cookie
-// this code cannot read (PRD v2.1 §7.1.1). AuthProvider asks the server
-// instead, and the browser attaches the cookie for it.
+// Synchronously read the refresh token from localStorage so AuthProvider
+// can immediately attempt the token exchange before the first render.
+authStore.getState().hydrateFromStorage();
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? "";
 

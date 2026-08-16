@@ -25,12 +25,7 @@ export interface ApiError {
 
 // ── Enums ─────────────────────────────────────────────────────────────────────
 
-/**
- * PLATFORM_STAFF is InterviewIQ's own staff, not a customer role (V053). It is
- * the only value that unlocks the platform console, and no customer-facing
- * screen should ever offer it as a choice.
- */
-export type UserRole = "ADMIN" | "RECRUITER" | "VIEWER" | "PLATFORM_STAFF";
+export type UserRole = "ADMIN" | "RECRUITER" | "VIEWER";
 
 export type CompanyStatus = "ACTIVE" | "INACTIVE" | "SUSPENDED";
 
@@ -44,74 +39,16 @@ export type EmploymentType = "FULL_TIME" | "PART_TIME" | "CONTRACT" | "INTERNSHI
 
 export type PipelineStatus = "PENDING" | "IN_PROGRESS" | "DONE" | "FAILED";
 
-/**
- * Interview session lifecycle (PRD v2.1 §7.4.4).
- *
- * SCHEDULED and EVALUATING are new in v2.1, and STARTED is renamed IN_PROGRESS.
- *
- * EVALUATING is user-visible on purpose: the PRD is explicit that it must not be
- * hidden behind a spinner, because recruiters running hiring drives need to see
- * which reports are still pending.
- */
 export type SessionStatus =
-  | "INVITED"       // link sent, not yet scheduled
-  | "SCHEDULED"     // candidate picked a time; capacity buckets held
-  | "IN_PROGRESS"   // candidate is in the interview room
-  | "EVALUATING"    // interview finished, scoring running
-  | "COMPLETED"     // report ready
+  | "INVITED"
+  | "STARTED"
+  | "COMPLETED"
   | "CANCELLED"
   | "EXPIRED"
-  /** Booked a slot and did not attend (V054). Distinct from EXPIRED, which
-      means an invite was never taken up at all — and not charged. */
-  | "NO_SHOW"
   | "ERROR";
 
-/**
- * Per-job interview length (PRD v2.1 §7.2.1). All four cost Rs.100 flat — the
- * tier is a product-fit decision, not a monetisation lever.
- */
-export type DurationTier = "QUICK" | "STANDARD" | "IN_DEPTH" | "COMPREHENSIVE";
-
-export const DURATION_TIERS: Record<
-  DurationTier,
-  { label: string; minutes: number; questions: number; description: string }
-> = {
-  QUICK: {
-    label: "Quick screen",
-    minutes: 20,
-    questions: 8,
-    description: "High-volume funnels, fresher roles, first-pass filtering",
-  },
-  STANDARD: {
-    label: "Standard",
-    minutes: 35,
-    questions: 15,
-    description: "The general-purpose first-round screen",
-  },
-  IN_DEPTH: {
-    label: "In-depth",
-    minutes: 45,
-    questions: 20,
-    description: "Mid-senior individual contributors, specialist roles",
-  },
-  COMPREHENSIVE: {
-    label: "Comprehensive",
-    minutes: 60,
-    questions: 26,
-    description: "Senior and lead roles where the screen replaces a technical call",
-  },
-};
-
-/** Where a question came from (PRD v2.1 §7.5.8). Shown on the report. */
-export type QuestionSource = "AI" | "EMPLOYER";
-
-/** Safety-filter outcome on an employer-supplied question (PRD v2.1 §7.5.8). */
-export type QuestionSafetyStatus = "PENDING" | "APPROVED" | "REJECTED";
-
 export type TransactionType =
-  | "TOPUP"          // paid, invoiced, GST-bearing
-  | "PROMO_CREDIT"   // free credit — never invoiced (PRD v2.1 §7.8.3)
-  | "PROMO_EXPIRY"   // reversing entry when unspent promo credit lapses
+  | "TOPUP"
   | "RESERVATION"
   | "SETTLEMENT"
   | "RELEASE"
@@ -178,10 +115,12 @@ export interface UserResponse {
 
 export interface AuthResponse {
   accessToken: string;
+  refreshToken: string;
   user: UserResponse;
 }
 
 export interface RefreshRequest {
+  refreshToken: string;
 }
 
 export interface VerifyOtpRequest {
@@ -283,8 +222,6 @@ export interface Job {
   description: string | null;
   experienceMin: number | null;
   experienceMax: number | null;
-  /** Interview length for this opening (PRD v2.1 §7.2.1). Defaults to STANDARD. */
-  durationTier: DurationTier;
   status: JobStatus;
   createdAt: string;
   updatedAt: string;
@@ -292,7 +229,6 @@ export interface Job {
 
 export interface CreateJobRequest {
   title: string;
-  durationTier?: DurationTier;
   department?: string;
   locationType?: LocationType;
   employmentType?: EmploymentType;
@@ -303,7 +239,6 @@ export interface CreateJobRequest {
 
 export interface UpdateJobRequest {
   title?: string;
-  durationTier?: DurationTier;
   department?: string;
   locationType?: LocationType;
   employmentType?: EmploymentType;
@@ -398,6 +333,10 @@ export interface CreateSessionRequest {
   scheduledAt: string;   // ISO-8601 UTC timestamp — must be a future time
 }
 
+export interface SetMeetUrlRequest {
+  meetUrl: string;
+}
+
 export interface ProctoringFlag {
   type: SessionEventType;
   count?: number;
@@ -434,43 +373,6 @@ export interface EvaluationQuestion {
   feedback?: string;
 }
 
-/** One dimension's narrative, with the answers it cites (PRD v2.1 §7.6). */
-export interface DimensionEvidence {
-  narrative: string;
-  /** Answer indexes supporting the claim. A claim with none is a defect. */
-  citedAnswerIndexes: number[];
-}
-
-export interface PerQuestionEvidence {
-  questionIndex: number;
-  score?: number;
-  narrative: string;
-}
-
-/**
- * Per-question narrative evidence (PRD v2.1 §7.6).
- *
- * Validated server-side before the report is persisted — "a report whose
- * narrative does not cite answers is a defect, not a stylistic preference".
- */
-export interface Evidence {
-  overallSummary: string;
-  dimensions: Record<string, DimensionEvidence>;
-  perQuestion: PerQuestionEvidence[];
-}
-
-/** One answer as stored, for rendering the transcript alongside the evidence. */
-export interface SessionAnswer {
-  questionIndex: number;
-  questionText: string;
-  /** EMPLOYER-sourced questions are labelled on the report (§7.5.8). */
-  questionSource: QuestionSource;
-  transcriptText: string | null;
-  score: number | null;
-  skipped: boolean;
-  isFollowUp: boolean;
-}
-
 export interface Evaluation {
   id: string;
   sessionId: string;
@@ -480,48 +382,18 @@ export interface Evaluation {
   improvements: string[];
   recommendation: "HIRE" | "HOLD" | "REJECT";
   questions: EvaluationQuestion[];
-  /** The v2.1 evidence payload. Absent on reports generated before v2.1. */
-  evidence?: Evidence;
-  answers?: SessionAnswer[];
-  /** True when the candidate answered some but not all questions (§7.5.7). */
-  partial?: boolean;
   transcript?: string;
-  /**
-   * The recruiter's private notes (INTIQ-29). Never sent to a model — an
-   * opinion formed after the interview must not influence the evaluation of it.
-   */
-  employerNotes?: string | null;
   createdAt: string;
 }
 
 // ── Billing / Wallet ──────────────────────────────────────────────────────────
 
-/**
- * Wallet balance, split into paid and promotional (PRD v2.1 §7.7, §7.8.3).
- *
- * The split is surfaced rather than summed because "a customer must never be
- * surprised about which money is being spent". Promotional credit is always
- * spent first, so a company on a free trial watches promoBalancePaise fall while
- * paidBalancePaise stays untouched — which is only reassuring if they can see
- * both numbers.
- */
 export interface Wallet {
   id: string;
   companyId: string;
-  /** Money the company bought. GST invoices are drawn against this alone. */
-  paidBalancePaise: number;
-  /** Free credit — spent first, never invoiced. */
-  promoBalancePaise: number;
-  /** paid + promotional. What the low-balance threshold is measured against. */
-  totalBalancePaise: number;
-  /** Ring-fenced for invited sessions and in-flight imports. */
-  reservedPaise: number;
-  /** total − reserved. What a new session can draw on. */
-  availablePaise: number;
-  /** Earliest expiry among outstanding grants, or null if none lapse. */
-  promoExpiresAt: string | null;
-  /** Whether the persistent low-balance banner should show (Rs.300 or below). */
-  lowBalance: boolean;
+  balancePaise: number;      // total balance in paise
+  reservedPaise: number;     // funds ring-fenced for active sessions
+  availablePaise: number;    // balancePaise − reservedPaise
 }
 
 export interface WalletTransaction {
@@ -567,6 +439,7 @@ export interface CandidateSession {
   jobTitle: string;
   companyName: string;
   scheduledAt: string | null;
+  meetUrl: string | null;
   status: SessionStatus;
 }
 
@@ -618,20 +491,4 @@ declare global {
       open: () => void;
     };
   }
-}
-
-/**
- * One thing the browser noticed during an interview (INTIQ-29).
- *
- * Deliberately carries no severity or verdict. These signals are weak
- * individually — a tab switch might be someone checking the time — and
- * summarising them into a judgement about a person, with their job at stake,
- * is not something the system has a basis for.
- */
-export interface ProctoringEvent {
-  id: string;
-  sessionId: string;
-  eventType: "TAB_SWITCH" | "CAMERA_OFF";
-  metadata?: string | null;
-  occurredAt: string;
 }

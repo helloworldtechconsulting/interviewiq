@@ -17,7 +17,6 @@ import com.interviewiq.auth.dto.VerifyEmailRequest;
 import com.interviewiq.auth.infrastructure.RefreshTokenRepository;
 import com.interviewiq.auth.infrastructure.UserRepository;
 import com.interviewiq.company.domain.Company;
-import com.interviewiq.billing.service.PromotionalGrantService;
 import com.interviewiq.company.infrastructure.CompanyRepository;
 import com.interviewiq.shared.exception.AuthorizationException;
 import com.interviewiq.shared.exception.ConflictException;
@@ -55,7 +54,6 @@ public class AuthService {
     private final PasswordEncoder        passwordEncoder;
     private final SecurityProperties     securityProperties;
     private final LoginAttemptService    loginAttemptService;
-    private final PromotionalGrantService promotionalGrantService;
 
     public AuthService(UserRepository userRepository,
                        RefreshTokenRepository refreshTokenRepository,
@@ -64,8 +62,7 @@ public class AuthService {
                        TokenService tokenService,
                        PasswordEncoder passwordEncoder,
                        SecurityProperties securityProperties,
-                       LoginAttemptService loginAttemptService,
-                       PromotionalGrantService promotionalGrantService) {
+                       LoginAttemptService loginAttemptService) {
         this.userRepository        = userRepository;
         this.refreshTokenRepository = refreshTokenRepository;
         this.companyRepository     = companyRepository;
@@ -74,7 +71,6 @@ public class AuthService {
         this.passwordEncoder       = passwordEncoder;
         this.securityProperties    = securityProperties;
         this.loginAttemptService   = loginAttemptService;
-        this.promotionalGrantService = promotionalGrantService;
     }
 
     // =========================================================================
@@ -122,7 +118,7 @@ public class AuthService {
      * a full token pair so the user is immediately logged in.
      */
     @Transactional
-    public AuthResponse.WithRefreshToken verifyEmail(String slug, VerifyEmailRequest request) {
+    public AuthResponse verifyEmail(String slug, VerifyEmailRequest request) {
         Company company = requireCompanyBySlug(slug);
         String email = request.email().toLowerCase();
 
@@ -137,17 +133,6 @@ public class AuthService {
 
         user.setEmailVerified(true);
         userRepository.save(user);
-
-        // PRD v2.1 §7.1.1: "On successful verification the signup promotional
-        // grant is applied." Failure to grant must not fail verification — the
-        // user has proved their address and is entitled to their account either
-        // way, and a missing grant is a support question, not a broken signup.
-        try {
-            promotionalGrantService.applySignupGrantIfEligible(company.getId(), email);
-        } catch (Exception e) {
-            log.error("Signup promotional grant failed for companyId={}: {}",
-                    company.getId(), e.getMessage(), e);
-        }
 
         log.info("Email verified: userId={}", user.getId());
         return issueTokenPair(user);
@@ -186,7 +171,7 @@ public class AuthService {
      * @throws AuthorizationException for any credential failure (no user enumeration)
      */
     @Transactional
-    public AuthResponse.WithRefreshToken login(String slug, LoginRequest request, String clientIp) {
+    public AuthResponse login(String slug, LoginRequest request, String clientIp) {
         loginAttemptService.checkLockout(clientIp);
 
         Company company = requireCompanyBySlug(slug);
@@ -216,7 +201,7 @@ public class AuthService {
      * issues a new token pair.
      */
     @Transactional
-    public AuthResponse.WithRefreshToken refresh(RefreshRequest request) {
+    public AuthResponse refresh(RefreshRequest request) {
         String hash = tokenService.hashToken(request.refreshToken());
 
         RefreshToken stored = refreshTokenRepository.findByTokenHash(hash)
@@ -308,16 +293,7 @@ public class AuthService {
      * Generates a new RS256 access token and a rotating refresh token, persists
      * the refresh token hash, and returns both in an {@link AuthResponse}.
      */
-    /**
-     * Generates a new RS256 access token and a rotating refresh token, persists
-     * the refresh token hash, and returns both.
-     *
-     * <p>The refresh token comes back separately from the {@link AuthResponse}
-     * rather than inside it, because the controller must place it in an
-     * HTTP-only cookie and the response body must not carry it (PRD v2.1 §7.1.1).
-     * Splitting them here means no caller can accidentally serialise it.
-     */
-    private AuthResponse.WithRefreshToken issueTokenPair(User user) {
+    private AuthResponse issueTokenPair(User user) {
         String accessToken  = tokenService.generateAccessToken(user);
         String rawRefresh   = tokenService.generateRefreshToken();
 
@@ -328,7 +304,6 @@ public class AuthService {
                 .plus(securityProperties.getJwt().getRefreshTokenExpiration()));
         refreshTokenRepository.save(rt);
 
-        return new AuthResponse.WithRefreshToken(
-                new AuthResponse(accessToken, UserResponse.from(user)), rawRefresh);
+        return new AuthResponse(accessToken, rawRefresh, UserResponse.from(user));
     }
 }

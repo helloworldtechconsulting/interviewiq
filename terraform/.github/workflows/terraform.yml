@@ -1,157 +1,298 @@
 # =============================================================================
-# Terraform CI — plan on PR, apply on merge
+# .github/workflows/terraform.yml
 #
-# Two environments on TWO DIFFERENT CLOUDS, which is the point (Arch v4.0 §6):
+# Terraform CI/CD Pipeline for InterviewIQ
 #
-#   staging     Oracle Cloud (OKE, Always Free)   auto-apply on merge
-#   production  Google Cloud (GKE, free zonal)    manual approval
+# Triggers:
+#   - PR to main → terraform plan (comment on PR)
+#   - Push to main → terraform apply (after manual approval in prod)
 #
-# "Run staging on a different cloud from production. Portability that has never
-# been exercised is a hope, not a property." Staging applying first means a
-# change that breaks portability fails here, before production.
+# Environments:
+#   - dev     → auto-apply on merge to main
+#   - staging → auto-apply on merge to main (after dev succeeds)
+#   - prod    → requires manual approval via GitHub Environments
 #
-# Replaces the previous AWS-only pipeline, which assumed ECS and AWS_ROLE_ARN_*.
+# Secrets required in GitHub:
+#   AWS_ROLE_ARN_DEV, AWS_ROLE_ARN_STAGING, AWS_ROLE_ARN_PROD
+#   (OIDC — no static AWS keys ever stored in GitHub)
+#   TF_VAR_db_password, TF_VAR_openai_api_key, etc. (environment-specific)
 # =============================================================================
 
-name: Terraform
+name: "Terraform"
 
 on:
   push:
-    branches: [master, main]
+    branches: [main]
     paths: ["terraform/**"]
   pull_request:
+    branches: [main]
     paths: ["terraform/**"]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options: [dev, staging, prod]
+      action:
+        description: "Action"
+        required: true
+        type: choice
+        options: [plan, apply, destroy]
 
 permissions:
+  id-token: write   # OIDC authentication to AWS (no static keys)
   contents: read
-  id-token: write # OIDC — no static cloud keys in GitHub (Arch v4.0 §8)
-  pull-requests: write
+  pull-requests: write  # post plan output as PR comment
 
 env:
-  TF_VERSION: "1.9.8"
+  TF_VERSION: "1.7.5"
+  AWS_REGION: "ap-south-1"
+
+# ── Reusable job template ─────────────────────────────────────────────────────
 
 jobs:
-  # ---------------------------------------------------------------------------
-  # Validate every module and environment. Cheap, and it catches the class of
-  # error that only surfaces at apply time otherwise.
-  # ---------------------------------------------------------------------------
+
+  # ── Validate & Format Check ────────────────────────────────────────────────
   validate:
+    name: "Validate Terraform"
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive terraform/
+        # Fails the build if code is not formatted — enforce with `terraform fmt`
+
+      - name: Validate all envs
+        run: |
+          for env in dev staging prod; do
+            echo "=== Validating $env ==="
+            cd terraform/envs/$env
+            terraform init -backend=false
+            terraform validate
+            cd ../../..
+          done
+
+  # ── Plan for each environment (on PR) ────────────────────────────────────
+  plan-dev:
+    name: "Plan: dev"
+    runs-on: ubuntu-latest
+    needs: validate
+    environment: dev
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_DEV }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        working-directory: terraform/envs/dev
+        run: terraform init
+
+      - name: Terraform Plan
+        id: plan
+        working-directory: terraform/envs/dev
+        env:
+          TF_VAR_db_password:         ${{ secrets.TF_VAR_DB_PASSWORD_DEV }}
+          TF_VAR_invite_secret:       ${{ secrets.TF_VAR_INVITE_SECRET_DEV }}
+          TF_VAR_openai_api_key:      ${{ secrets.TF_VAR_OPENAI_API_KEY }}
+          TF_VAR_razorpay_key_id:     ${{ secrets.TF_VAR_RAZORPAY_KEY_ID_DEV }}
+          TF_VAR_razorpay_key_secret: ${{ secrets.TF_VAR_RAZORPAY_KEY_SECRET_DEV }}
+        run: |
+          terraform plan -no-color -out=tfplan 2>&1 | tee plan_output.txt
+          echo "exitcode=$?" >> $GITHUB_OUTPUT
+
+      - name: Post Plan to PR
+        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request'
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('terraform/envs/dev/plan_output.txt', 'utf8');
+            const maxLength = 65000;
+            const truncated = plan.length > maxLength
+              ? plan.substring(0, maxLength) + '\n\n... (truncated)'
+              : plan;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## Terraform Plan: dev\n\`\`\`\n${truncated}\n\`\`\``
+            });
+
+  # ── Apply: dev (auto on merge to main) ───────────────────────────────────
+  apply-dev:
+    name: "Apply: dev"
+    runs-on: ubuntu-latest
+    needs: validate
+    environment: dev
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_DEV }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        working-directory: terraform/envs/dev
+        run: terraform init
+
+      - name: Terraform Apply
+        working-directory: terraform/envs/dev
+        env:
+          TF_VAR_db_password:         ${{ secrets.TF_VAR_DB_PASSWORD_DEV }}
+          TF_VAR_invite_secret:       ${{ secrets.TF_VAR_INVITE_SECRET_DEV }}
+          TF_VAR_openai_api_key:      ${{ secrets.TF_VAR_OPENAI_API_KEY }}
+          TF_VAR_razorpay_key_id:     ${{ secrets.TF_VAR_RAZORPAY_KEY_ID_DEV }}
+          TF_VAR_razorpay_key_secret: ${{ secrets.TF_VAR_RAZORPAY_KEY_SECRET_DEV }}
+        run: terraform apply -auto-approve
+
+      - name: Notify on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🚨 Terraform apply failed: dev`,
+              body: `Terraform apply failed in dev environment. Check run: ${context.runUrl}`,
+              labels: ['infrastructure', 'bug']
+            });
+
+  # ── Apply: staging (after dev succeeds) ──────────────────────────────────
+  apply-staging:
+    name: "Apply: staging"
+    runs-on: ubuntu-latest
+    needs: apply-dev
+    environment: staging
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_STAGING }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        working-directory: terraform/envs/staging
+        run: terraform init
+
+      - name: Terraform Apply
+        working-directory: terraform/envs/staging
+        env:
+          TF_VAR_db_password:         ${{ secrets.TF_VAR_DB_PASSWORD_STAGING }}
+          TF_VAR_jwt_private_key_pem: ${{ secrets.TF_VAR_JWT_PRIVATE_KEY_PEM }}
+          TF_VAR_jwt_public_key_pem:  ${{ secrets.TF_VAR_JWT_PUBLIC_KEY_PEM }}
+          TF_VAR_invite_secret:       ${{ secrets.TF_VAR_INVITE_SECRET }}
+          TF_VAR_openai_api_key:      ${{ secrets.TF_VAR_OPENAI_API_KEY }}
+          TF_VAR_razorpay_key_id:     ${{ secrets.TF_VAR_RAZORPAY_KEY_ID_STAGING }}
+          TF_VAR_razorpay_key_secret: ${{ secrets.TF_VAR_RAZORPAY_KEY_SECRET_STAGING }}
+        run: terraform apply -auto-approve
+
+  # ── Apply: prod (REQUIRES MANUAL APPROVAL in GitHub Environments) ─────────
+  apply-prod:
+    name: "Apply: prod"
+    runs-on: ubuntu-latest
+    needs: apply-staging
+    environment: prod  # GitHub Environment with required_reviewers = true
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_PROD }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        working-directory: terraform/envs/prod
+        run: terraform init
+
+      - name: Terraform Plan (pre-approval)
+        working-directory: terraform/envs/prod
+        env:
+          TF_VAR_db_password:         ${{ secrets.TF_VAR_DB_PASSWORD_PROD }}
+          TF_VAR_jwt_private_key_pem: ${{ secrets.TF_VAR_JWT_PRIVATE_KEY_PEM_PROD }}
+          TF_VAR_jwt_public_key_pem:  ${{ secrets.TF_VAR_JWT_PUBLIC_KEY_PEM_PROD }}
+          TF_VAR_invite_secret:       ${{ secrets.TF_VAR_INVITE_SECRET_PROD }}
+          TF_VAR_openai_api_key:      ${{ secrets.TF_VAR_OPENAI_API_KEY_PROD }}
+          TF_VAR_razorpay_key_id:     ${{ secrets.TF_VAR_RAZORPAY_KEY_ID_PROD }}
+          TF_VAR_razorpay_key_secret: ${{ secrets.TF_VAR_RAZORPAY_KEY_SECRET_PROD }}
+        run: terraform plan -no-color -out=tfplan
+
+      - name: Terraform Apply (post-approval)
+        working-directory: terraform/envs/prod
+        env:
+          TF_VAR_db_password:         ${{ secrets.TF_VAR_DB_PASSWORD_PROD }}
+          TF_VAR_jwt_private_key_pem: ${{ secrets.TF_VAR_JWT_PRIVATE_KEY_PEM_PROD }}
+          TF_VAR_jwt_public_key_pem:  ${{ secrets.TF_VAR_JWT_PUBLIC_KEY_PEM_PROD }}
+          TF_VAR_invite_secret:       ${{ secrets.TF_VAR_INVITE_SECRET_PROD }}
+          TF_VAR_openai_api_key:      ${{ secrets.TF_VAR_OPENAI_API_KEY_PROD }}
+          TF_VAR_razorpay_key_id:     ${{ secrets.TF_VAR_RAZORPAY_KEY_ID_PROD }}
+          TF_VAR_razorpay_key_secret: ${{ secrets.TF_VAR_RAZORPAY_KEY_SECRET_PROD }}
+        run: terraform apply tfplan
+
+  # ── Drift Detection (runs daily) ─────────────────────────────────────────
+  drift-detection:
+    name: "Drift Detection"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
     strategy:
       matrix:
-        dir:
-          - terraform/modules/workload
-          - terraform/modules/edge
-          - terraform/modules/platform/gcp
-          - terraform/modules/platform/oci
-          - terraform/envs/staging
-          - terraform/envs/production
+        env: [dev, staging, prod]
+
     steps:
       - uses: actions/checkout@v4
-
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets[format('AWS_ROLE_ARN_{0}', matrix.env)] }}
+          aws-region: ${{ env.AWS_REGION }}
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TF_VERSION }}
-
-      - name: Format check
-        run: terraform fmt -check -recursive ${{ matrix.dir }}
-
-      - name: Validate
-        working-directory: ${{ matrix.dir }}
+      - name: Check for drift
+        working-directory: terraform/envs/${{ matrix.env }}
         run: |
-          terraform init -backend=false -input=false
-          terraform validate
-
-  # ---------------------------------------------------------------------------
-  # Staging — Oracle Cloud
-  # ---------------------------------------------------------------------------
-  staging:
-    needs: validate
-    runs-on: ubuntu-latest
-    environment: staging
-    defaults:
-      run:
-        working-directory: terraform/envs/staging
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
-
-      - name: Init
-        run: terraform init -input=false
-        env:
-          AWS_ACCESS_KEY_ID:     ${{ secrets.OCI_S3_ACCESS_KEY }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.OCI_S3_SECRET_KEY }}
-          AWS_ENDPOINT_URL_S3:   ${{ secrets.OCI_S3_ENDPOINT }}
-
-      - name: Plan
-        run: terraform plan -input=false -out=tfplan
-        env:
-          TF_VAR_compartment_id:      ${{ secrets.OCI_COMPARTMENT_ID }}
-          TF_VAR_availability_domain: ${{ secrets.OCI_AVAILABILITY_DOMAIN }}
-          TF_VAR_node_image_id:       ${{ secrets.OCI_NODE_IMAGE_ID }}
-          TF_VAR_image:               ghcr.io/${{ github.repository }}:${{ github.sha }}
-          TF_VAR_zone_name:           ${{ vars.ZONE_NAME }}
-          TF_VAR_cloudflare_zone_id:  ${{ secrets.CLOUDFLARE_ZONE_ID }}
-          TF_VAR_ingress_ip:          ${{ vars.STAGING_INGRESS_IP }}
-          TF_VAR_spa_origin_hostname: ${{ vars.STAGING_SPA_ORIGIN }}
-          TF_VAR_r2_endpoint:         ${{ secrets.R2_ENDPOINT }}
-          TF_VAR_r2_bucket:           ${{ vars.R2_BUCKET_STAGING }}
-          TF_VAR_r2_access_key:       ${{ secrets.R2_ACCESS_KEY }}
-          TF_VAR_r2_secret_key:       ${{ secrets.R2_SECRET_KEY }}
-          CLOUDFLARE_API_TOKEN:       ${{ secrets.CLOUDFLARE_API_TOKEN }}
-
-      - name: Apply
-        if: github.event_name == 'push'
-        run: terraform apply -input=false -auto-approve tfplan
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-
-  # ---------------------------------------------------------------------------
-  # Production — Google Cloud. Gated on staging having applied cleanly, which is
-  # how the portability claim gets exercised before it matters.
-  # ---------------------------------------------------------------------------
-  production:
-    needs: staging
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    environment: production # requires manual approval in GitHub Environments
-    defaults:
-      run:
-        working-directory: terraform/envs/production
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-
-      - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
-
-      - name: Init
-        run: terraform init -input=false
-
-      - name: Plan
-        run: terraform plan -input=false -out=tfplan
-        env:
-          TF_VAR_project_id:          ${{ secrets.GCP_PROJECT_ID }}
-          TF_VAR_image:               ghcr.io/${{ github.repository }}:${{ github.sha }}
-          TF_VAR_zone_name:           ${{ vars.ZONE_NAME }}
-          TF_VAR_cloudflare_zone_id:  ${{ secrets.CLOUDFLARE_ZONE_ID }}
-          TF_VAR_ingress_ip:          ${{ vars.PROD_INGRESS_IP }}
-          TF_VAR_spa_origin_hostname: ${{ vars.PROD_SPA_ORIGIN }}
-          TF_VAR_r2_endpoint:         ${{ secrets.R2_ENDPOINT }}
-          TF_VAR_r2_bucket:           ${{ vars.R2_BUCKET_PROD }}
-          TF_VAR_r2_access_key:       ${{ secrets.R2_ACCESS_KEY }}
-          TF_VAR_r2_secret_key:       ${{ secrets.R2_SECRET_KEY }}
-          CLOUDFLARE_API_TOKEN:       ${{ secrets.CLOUDFLARE_API_TOKEN }}
-
-      - name: Apply
-        run: terraform apply -input=false -auto-approve tfplan
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          terraform init
+          terraform plan -detailed-exitcode -no-color || echo "DRIFT DETECTED in ${{ matrix.env }}"

@@ -75,39 +75,6 @@ public class WalletTransaction {
     @Column(length = 500)
     private String description;
 
-    /**
-     * True for PROMO_CREDIT and PROMO_EXPIRY. Denormalised from the type so that
-     * "exclude promotional movement" is a single indexed predicate on the
-     * invoice and revenue queries rather than a type list that has to be kept in
-     * sync in several places.
-     */
-    @Column(name = "is_promotional", nullable = false)
-    private boolean promotional = false;
-
-    /** Optional expiry on a promotional grant. Swept by PromoCreditExpiryJob. */
-    private OffsetDateTime expiresAt;
-
-    /**
-     * Why the grant was made. Mandatory on PROMO_CREDIT and enforced by a
-     * database CHECK — the PRD requires a reason on every staff grant, and an
-     * unexplained free-credit entry is exactly what makes promotional exposure
-     * unauditable.
-     */
-    @Column(length = 500)
-    private String grantReason;
-
-    /** The staff user who made the grant. Grants are staff-only (§7.1.3). */
-    private UUID grantedByStaffId;
-
-    /** Set on the batch reservation and release for a bulk CSV import. */
-    private UUID importBatchId;
-
-    /**
-     * GST charged on a paid top-up, shown separately on the invoice. Always null
-     * or zero on promotional movement, because promotional credit is not a sale.
-     */
-    private Long gstPaise;
-
     @Column(nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 
@@ -150,24 +117,6 @@ public class WalletTransaction {
 
     public String getDescription() { return description; }
     public void setDescription(String description) { this.description = description; }
-
-    public boolean isPromotional() { return promotional; }
-    public void setPromotional(boolean promotional) { this.promotional = promotional; }
-
-    public OffsetDateTime getExpiresAt() { return expiresAt; }
-    public void setExpiresAt(OffsetDateTime expiresAt) { this.expiresAt = expiresAt; }
-
-    public String getGrantReason() { return grantReason; }
-    public void setGrantReason(String grantReason) { this.grantReason = grantReason; }
-
-    public UUID getGrantedByStaffId() { return grantedByStaffId; }
-    public void setGrantedByStaffId(UUID grantedByStaffId) { this.grantedByStaffId = grantedByStaffId; }
-
-    public UUID getImportBatchId() { return importBatchId; }
-    public void setImportBatchId(UUID importBatchId) { this.importBatchId = importBatchId; }
-
-    public Long getGstPaise() { return gstPaise; }
-    public void setGstPaise(Long gstPaise) { this.gstPaise = gstPaise; }
 
     public OffsetDateTime getCreatedAt() { return createdAt; }
 

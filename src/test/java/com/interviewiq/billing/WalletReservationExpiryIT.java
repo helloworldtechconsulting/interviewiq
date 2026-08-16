@@ -3,11 +3,8 @@ package com.interviewiq.billing;
 import com.interviewiq.billing.infrastructure.WalletTransactionRepository;
 import com.interviewiq.billing.service.StrandedReservationCleanupRunner;
 import com.interviewiq.billing.service.WalletService;
-import com.interviewiq.email.service.EmailService;
-import com.interviewiq.scheduling.service.CapacityService;
 import com.interviewiq.session.scheduler.SessionExpiryJob;
 import com.interviewiq.session.service.SessionExpiryService;
-import com.interviewiq.shared.config.BillingProperties;
 import com.interviewiq.shared.config.RazorpayProperties;
 import com.interviewiq.support.AbstractPostgresIntegrationTest;
 import com.razorpay.RazorpayClient;
@@ -59,33 +56,6 @@ class WalletReservationExpiryIT extends AbstractPostgresIntegrationTest {
         // WalletService needs these to construct, but the reserve/release paths never touch them.
         @Bean RazorpayClient razorpayClient() { return mock(RazorpayClient.class); }
         @Bean RazorpayProperties razorpayProperties() { return mock(RazorpayProperties.class); }
-
-        /**
-         * Real defaults rather than a mock. The reservation amount comes from
-         * {@code sessionCostPaise}, so a mock would return 0 and every
-         * assertion below would pass against a reservation of nothing.
-         *
-         * <p>This bean was missing entirely until INTIQ-100 bound the Failsafe
-         * plugin. {@code WalletService} grew the dependency at some point and
-         * this context stopped loading — silently, because no execution was
-         * running {@code *IT} classes.
-         */
-        @Bean BillingProperties billingProperties() { return new BillingProperties(); }
-
-        /**
-         * Mocked, unlike BillingProperties. WalletService uses it only for the
-         * low-balance warning, which neither reserve nor release triggers —
-         * and a test that sent real email would be a test with a side effect
-         * outside the database.
-         */
-        @Bean EmailService emailService() { return mock(EmailService.class); }
-
-        /**
-         * Mocked. Expiry also releases the session's capacity bucket, but that
-         * behaviour is CapacityServiceIT's subject; here it is a collaborator
-         * this test makes no claim about.
-         */
-        @Bean CapacityService capacityService() { return mock(CapacityService.class); }
     }
 
     @Autowired SessionExpiryJob sessionExpiryJob;
@@ -175,14 +145,9 @@ class WalletReservationExpiryIT extends AbstractPostgresIntegrationTest {
                         + "VALUES (?, ?, ?, ?, 'DONE', 'ACTIVE')",
                 jobId, companyId, userId, "Backend Engineer");
 
-        // candidate_ref became NOT NULL in V045 (PRD §7.5.6 — it is the
-        // pseudonym the AI sees instead of a real name). This seed predates
-        // that migration and was never corrected, because nothing was running
-        // this class.
-        jdbc.update("INSERT INTO candidates (id, company_id, job_opening_id, email, full_name, candidate_ref) "
-                        + "VALUES (?, ?, ?, ?, ?, ?)",
-                candidateId, companyId, jobId, "cand-" + candidateId + "@example.com", "Jane Candidate",
-                "cand_" + candidateId.toString().replace("-", ""));
+        jdbc.update("INSERT INTO candidates (id, company_id, job_opening_id, email, full_name) "
+                        + "VALUES (?, ?, ?, ?, ?)",
+                candidateId, companyId, jobId, "cand-" + candidateId + "@example.com", "Jane Candidate");
 
         jdbc.update("INSERT INTO wallets (id, company_id, balance_paise, reserved_paise, version) "
                         + "VALUES (?, ?, ?, ?, 0)",

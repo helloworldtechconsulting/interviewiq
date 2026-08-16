@@ -83,44 +83,9 @@ public class JobOpening {
     @Column(name = "questions_jsonb", columnDefinition = "jsonb")
     private String questionsJsonb;
 
-    /**
-     * The opening's question bank — roughly 50 dimension-tagged questions plus
-     * the ids of the comparability core (INTIQ-17, V056).
-     *
-     * <p>Written once per opening rather than per candidate. Everything a
-     * candidate is asked is drawn from here except their resume-anchored
-     * questions, which is what keeps 25 candidates for the same role scorable
-     * against each other.
-     */
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "question_bank_jsonb", columnDefinition = "jsonb")
-    private String questionBankJsonb;
-
-    @Enumerated(EnumType.STRING)
-    @Column(name = "question_bank_status", nullable = false, length = 50)
-    private PipelineStatus questionBankStatus = PipelineStatus.PENDING;
-
-    @Column(name = "question_bank_generated_at")
-    private OffsetDateTime questionBankGeneratedAt;
-
-    @Column(name = "question_bank_attempts", nullable = false)
-    private int questionBankAttempts = 0;
-
-    @Column(name = "question_bank_claimed_at")
-    private OffsetDateTime questionBankClaimedAt;
-
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 50)
     private JobStatus status = JobStatus.ACTIVE;
-
-    /**
-     * How long interviews for this opening run, and therefore how many questions
-     * are generated and how many capacity buckets a booking occupies
-     * (PRD v2.1 §7.2.1). Defaults to Standard.
-     */
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 20)
-    private DurationTier durationTier = DurationTier.defaultTier();
 
     @Column(nullable = false, updatable = false)
     private OffsetDateTime createdAt;
@@ -181,21 +146,6 @@ public class JobOpening {
     public Integer getExperienceMax() { return experienceMax; }
     public void setExperienceMax(Integer experienceMax) { this.experienceMax = experienceMax; }
 
-    public String getQuestionBankJsonb() { return questionBankJsonb; }
-    public void setQuestionBankJsonb(String v) { this.questionBankJsonb = v; }
-
-    public PipelineStatus getQuestionBankStatus() { return questionBankStatus; }
-    public void setQuestionBankStatus(PipelineStatus v) { this.questionBankStatus = v; }
-
-    public OffsetDateTime getQuestionBankGeneratedAt() { return questionBankGeneratedAt; }
-    public void setQuestionBankGeneratedAt(OffsetDateTime v) { this.questionBankGeneratedAt = v; }
-
-    public int getQuestionBankAttempts() { return questionBankAttempts; }
-    public void setQuestionBankAttempts(int v) { this.questionBankAttempts = v; }
-
-    public OffsetDateTime getQuestionBankClaimedAt() { return questionBankClaimedAt; }
-    public void setQuestionBankClaimedAt(OffsetDateTime v) { this.questionBankClaimedAt = v; }
-
     public String getQuestionsJsonb() { return questionsJsonb; }
     public void setQuestionsJsonb(String questionsJsonb) { this.questionsJsonb = questionsJsonb; }
 
@@ -209,7 +159,4 @@ public class JobOpening {
     public String toString() {
         return "JobOpening{id=" + id + ", companyId=" + companyId + ", title='" + title + "'}";
     }
-
-    public DurationTier getDurationTier() { return durationTier; }
-    public void setDurationTier(DurationTier durationTier) { this.durationTier = durationTier; }
 }

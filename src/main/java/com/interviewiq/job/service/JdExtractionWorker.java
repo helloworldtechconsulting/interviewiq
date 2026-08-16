@@ -2,7 +2,6 @@ package com.interviewiq.job.service;
 
 import com.interviewiq.job.domain.JobOpening;
 import com.interviewiq.job.infrastructure.JobOpeningRepository;
-import com.interviewiq.shared.config.WorkerProperties;
 import com.interviewiq.shared.domain.PipelineStatus;
 import com.interviewiq.storage.service.StorageService;
 import org.apache.tika.exception.TikaException;
@@ -13,7 +12,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,8 +19,6 @@ import org.xml.sax.SAXException;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
 import java.util.List;
 
 /**
@@ -52,7 +48,6 @@ import java.util.List;
  * This worker's DONE transition is what unlocks session creation for a job.
  */
 @Component
-@ConditionalOnProperty(name = "app.schedulers.enabled", havingValue = "true", matchIfMissing = true)
 public class JdExtractionWorker {
 
     private static final Logger log = LoggerFactory.getLogger(JdExtractionWorker.class);
@@ -62,7 +57,6 @@ public class JdExtractionWorker {
 
     private final JobOpeningRepository jobOpeningRepository;
     private final StorageService       storageService;
-    private final WorkerProperties     workerProperties;
 
     /**
      * Self-reference injected lazily to ensure calls to {@link #extractSingle} go through
@@ -73,11 +67,9 @@ public class JdExtractionWorker {
     private JdExtractionWorker self;
 
     public JdExtractionWorker(JobOpeningRepository jobOpeningRepository,
-                               StorageService storageService,
-                               WorkerProperties workerProperties) {
+                               StorageService storageService) {
         this.jobOpeningRepository = jobOpeningRepository;
         this.storageService       = storageService;
-        this.workerProperties     = workerProperties;
     }
 
     /**
@@ -92,19 +84,16 @@ public class JdExtractionWorker {
      */
     @Scheduled(initialDelayString = "PT10S", fixedDelayString = "PT30S")
     public void extractPendingJds() {
-        OffsetDateTime staleBefore =
-                OffsetDateTime.now(ZoneOffset.UTC).minus(workerProperties.getStaleClaimAfter());
+        List<JobOpening> workItems = jobOpeningRepository
+                .findAllByJdExtractionStatusInAndJdS3KeyIsNotNull(
+                        List.of(PipelineStatus.PENDING, PipelineStatus.IN_PROGRESS));
 
-        // Claims a distinct, bounded batch per pod (PRD v2.1 §7.9). The previous
-        // derived query returned the same rows on every pod.
-        List<JobOpening> claimed = jobOpeningRepository.claimForJdExtraction(
-                workerProperties.getExtractionBatchSize(), staleBefore);
+        if (workItems.isEmpty()) return;
 
-        if (claimed.isEmpty()) return;
+        log.debug("JdExtractionWorker: processing {} JD(s) (PENDING + IN_PROGRESS recovery)",
+                workItems.size());
 
-        log.debug("JdExtractionWorker: claimed {} JD(s)", claimed.size());
-
-        for (JobOpening job : claimed) {
+        for (JobOpening job : workItems) {
             self.extractSingle(job);  // call through proxy so @Transactional applies
         }
     }

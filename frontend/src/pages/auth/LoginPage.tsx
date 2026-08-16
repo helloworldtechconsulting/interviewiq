@@ -54,7 +54,7 @@ export function LoginPage() {
   const mutation = useMutation({
     mutationFn: (credentials: FormData) => authApi.login(credentials),
     onSuccess(data) {
-      authStore.getState().setAccessToken(data.accessToken);
+      authStore.getState().setTokens(data.accessToken, data.refreshToken);
       navigate(from, { replace: true });
     },
     onError(error) {
@@ -89,7 +89,7 @@ export function LoginPage() {
   const googleMutation = useMutation({
     mutationFn: (idToken: string) => authApi.googleLogin(idToken),
     onSuccess(data) {
-      authStore.getState().setAccessToken(data.accessToken);
+      authStore.getState().setTokens(data.accessToken, data.refreshToken);
       navigate(from, { replace: true });
     },
     onError(error) {

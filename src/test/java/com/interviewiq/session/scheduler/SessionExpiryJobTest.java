@@ -18,7 +18,6 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -58,8 +57,8 @@ class SessionExpiryJobTest {
         UUID s1 = UUID.randomUUID();
         UUID s2 = UUID.randomUUID();
 
-        when(sessionRepository.findByStatusInAndInviteExpiresAtBefore(
-                anyCollection(), any(OffsetDateTime.class), any(Pageable.class)))
+        when(sessionRepository.findByStatusAndInviteExpiresAtBefore(
+                eq(SessionStatus.INVITED), any(OffsetDateTime.class), any(Pageable.class)))
                 .thenReturn(pageOf(sessionWithId(s1), sessionWithId(s2)))  // first round
                 .thenReturn(pageOf());                                     // drained
 
@@ -77,8 +76,8 @@ class SessionExpiryJobTest {
         UUID bad = UUID.randomUUID();
         UUID good = UUID.randomUUID();
 
-        when(sessionRepository.findByStatusInAndInviteExpiresAtBefore(
-                anyCollection(), any(OffsetDateTime.class), any(Pageable.class)))
+        when(sessionRepository.findByStatusAndInviteExpiresAtBefore(
+                eq(SessionStatus.INVITED), any(OffsetDateTime.class), any(Pageable.class)))
                 .thenReturn(pageOf(sessionWithId(bad), sessionWithId(good)))
                 .thenReturn(pageOf());
 
@@ -97,8 +96,8 @@ class SessionExpiryJobTest {
     void abortsInsteadOfLoopingWhenEveryRowFails() {
         // A full-throughput page where every session throws => no forward progress.
         // The job must abort after one round rather than re-fetch the same rows forever.
-        when(sessionRepository.findByStatusInAndInviteExpiresAtBefore(
-                anyCollection(), any(OffsetDateTime.class), any(Pageable.class)))
+        when(sessionRepository.findByStatusAndInviteExpiresAtBefore(
+                eq(SessionStatus.INVITED), any(OffsetDateTime.class), any(Pageable.class)))
                 .thenReturn(pageOf(sessionWithId(UUID.randomUUID())));
 
         when(sessionExpiryService.expireAndRelease(any(UUID.class)))
@@ -107,14 +106,14 @@ class SessionExpiryJobTest {
         job().expireStaleInvites();
 
         // Repository queried exactly once — the loop broke on zero progress.
-        verify(sessionRepository, times(1)).findByStatusInAndInviteExpiresAtBefore(
-                anyCollection(), any(OffsetDateTime.class), any(Pageable.class));
+        verify(sessionRepository, times(1)).findByStatusAndInviteExpiresAtBefore(
+                any(SessionStatus.class), any(OffsetDateTime.class), any(Pageable.class));
     }
 
     @Test
     void noStaleSessions_doesNothing() {
-        when(sessionRepository.findByStatusInAndInviteExpiresAtBefore(
-                anyCollection(), any(OffsetDateTime.class), any(Pageable.class)))
+        when(sessionRepository.findByStatusAndInviteExpiresAtBefore(
+                eq(SessionStatus.INVITED), any(OffsetDateTime.class), any(Pageable.class)))
                 .thenReturn(pageOf());
 
         job().expireStaleInvites();

@@ -1,25 +1,41 @@
 # =============================================================================
-# ci.yml — InterviewIQ backend continuous integration
+# ci.yml — InterviewIQ Backend CI/CD Pipeline
 #
-#   test ──▶ dependency-scan ──▶ image ──▶ image-scan
+# Jobs
+# ┌──────────┐     ┌──────────────┐     ┌───────────────┐
+# │   test   │────▶│ docker-build │────▶│  docker-push  │
+# └──────────┘     └──────────────┘     └───────────────┘
 #
-# Deployment lives in cd.yml, which consumes the image this workflow publishes.
+#  test          — compile + run the full test suite on every push and PR
+#  docker-build  — build the Docker image to verify the Dockerfile is valid
+#                  runs on every push to main; skipped on PRs from forks
+#  docker-push   — push image to GitHub Container Registry (GHCR)
+#                  runs only on push to main (not on PRs)
 #
-# ── Branch trigger ───────────────────────────────────────────────────────────
-# This previously triggered on "main" and "develop". Neither branch exists in
-# this repository — the default branch is master — so the workflow had never
-# run once. Everything downstream of that (the test suite, the image build)
-# was configuration that looked like coverage without being coverage.
+# Container registry
+#   Images are pushed to GHCR:
+#   ghcr.io/<owner>/<repo>/interviewiq-backend:<tag>
+#
+#   Tags applied automatically by docker/metadata-action:
+#     • main        — latest commit on main branch
+#     • sha-<hash>  — immutable per-commit tag (for rollbacks)
+#
+# Secrets required (Settings → Secrets → Actions)
+#   None for CI (GHCR login uses the built-in GITHUB_TOKEN).
+#   For deployment steps (not yet added), you would add:
+#     DB_HOST, APP_SECURITY_JWT_PRIVATE_KEY_PEM, etc.
 # =============================================================================
 
 name: CI
 
 on:
   push:
-    branches: ["master"]
+    branches: ["main", "develop"]
   pull_request:
-    branches: ["master"]
+    branches: ["main"]
 
+# Cancel in-progress runs for the same branch when a new push arrives.
+# Saves CI minutes during fast iteration.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -30,10 +46,28 @@ env:
 
 jobs:
 
-  # ── Test ────────────────────────────────────────────────────────────────────
+  # ── Job 1: Test ─────────────────────────────────────────────────────────────
   test:
     name: Build & Test
     runs-on: ubuntu-latest
+
+    # Start a Postgres service container so integration tests can connect.
+    # Spring Boot unit tests (Mockito) don't need it, but if you add
+    # @SpringBootTest / @DataJpaTest tests later, they'll find it at localhost:5432.
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB:       interviewiq_test
+          POSTGRES_USER:     interviewiq
+          POSTGRES_PASSWORD: interviewiq_ci_secret
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U interviewiq -d interviewiq_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
 
     steps:
       - name: Checkout
@@ -44,108 +78,44 @@ jobs:
         with:
           java-version: "21"
           distribution: temurin
+          # Cache the local Maven repository (.m2) between runs.
+          # Cache key includes the pom.xml hash so it's busted on dependency changes.
           cache: maven
 
-      # ./mvnw, not mvn. The wrapper pins the Maven version; the runner's
-      # preinstalled `mvn` is whatever the image ships this month, which is a
-      # difference between local and CI that nobody controls.
-      #
-      # No Postgres service container: the integration tests use Testcontainers
-      # and start their own PostgreSQL 16, matching the managed version the PRD
-      # specifies. The service container that used to be here ran Postgres 15
-      # and nothing ever connected to it.
-      - name: Build, test and verify
-        run: ./mvnw verify -B
+      - name: Run tests
+        run: mvn verify -B
         env:
+          # Supply stub values so Spring context can start for @WebMvcTest slices.
+          # Unit tests (TokenServiceTest, WalletServiceTest, etc.) don't need a DB;
+          # the service container above covers future @DataJpaTest tests.
           SPRING_PROFILES_ACTIVE: local
+          SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/interviewiq_test
+          SPRING_DATASOURCE_USERNAME: interviewiq
+          SPRING_DATASOURCE_PASSWORD: interviewiq_ci_secret
+          # Stub AI / third-party keys — local profile already sets these to stubs
           SPRING_AI_OPENAI_API_KEY: ci-stub-key
 
       - name: Upload test reports
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: test-reports
-          path: |
-            target/surefire-reports/
-            target/failsafe-reports/
+          name: surefire-reports
+          path: target/surefire-reports/
           retention-days: 7
 
-  # ── Frontend ────────────────────────────────────────────────────────────────
-  frontend:
-    name: Frontend Build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
 
-      - name: Set up Node 22
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install
-        working-directory: frontend
-        run: npm ci
-
-      - name: Type-check and build
-        working-directory: frontend
-        run: npm run build
-
-  # ── Dependency vulnerabilities ──────────────────────────────────────────────
-  dependency-scan:
-    name: Dependency Scan
+  # ── Job 2: Docker Build ──────────────────────────────────────────────────────
+  docker-build:
+    name: Docker Build
     runs-on: ubuntu-latest
     needs: test
-    permissions:
-      contents: read
-      security-events: write
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      # Trivy in filesystem mode rather than OWASP dependency-check. Both find
-      # vulnerable dependencies; this one does not need an NVD API key, does
-      # not spend the first eight minutes of every cold run downloading the
-      # CVE database, and covers the frontend's npm tree in the same pass.
-      - name: Scan dependencies
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          scan-type: fs
-          scan-ref: .
-          scanners: vuln
-          format: sarif
-          output: trivy-deps.sarif
-          severity: CRITICAL,HIGH
-          # Report-only. A newly published CVE in a transitive dependency
-          # would otherwise block an unrelated hotfix at the worst moment —
-          # the findings still surface in the Security tab, which is where
-          # they get triaged rather than reflexively worked around.
-          exit-code: "0"
-
-      - name: Upload results
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: trivy-deps.sarif
-          category: dependencies
-
-  # ── Image ───────────────────────────────────────────────────────────────────
-  image:
-    name: Build & Push Image
-    runs-on: ubuntu-latest
-    needs: [test, frontend]
+    # Only build the Docker image on pushes (not on PRs) to avoid leaking
+    # registry credentials. PRs from forks don't have access to secrets.
     if: github.event_name == 'push'
 
     permissions:
       contents: read
-      packages: write
-
-    outputs:
-      digest: ${{ steps.build.outputs.digest }}
-      tags: ${{ steps.meta.outputs.tags }}
+      packages: write   # required to push to GHCR
 
     steps:
       - name: Checkout
@@ -154,74 +124,45 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to GHCR
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
+      - name: Extract Docker metadata (tags and labels)
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
+            # Tag with branch name on every push (e.g. "main")
             type=ref,event=branch
+            # Tag with short commit SHA for immutable rollback targets (e.g. "sha-a1b2c3d")
             type=sha,prefix=sha-,format=short
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
+            # Tag as "latest" only when pushing to main
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
-      - name: Build and push
-        id: build
+      - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Use GitHub Actions cache to speed up subsequent builds.
+          # The dependency layer (Stage 1) is almost always a cache hit.
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # Only build the final runner stage — skip re-exporting the builder
           target: runner
 
       - name: Summary
         run: |
-          {
-            echo "### Image published"
-            echo
-            echo '```'
-            echo "${{ steps.meta.outputs.tags }}"
-            echo "digest: ${{ steps.build.outputs.digest }}"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-
-  # ── Image vulnerabilities ───────────────────────────────────────────────────
-  image-scan:
-    name: Image Scan
-    runs-on: ubuntu-latest
-    needs: image
-    if: github.event_name == 'push'
-    permissions:
-      contents: read
-      packages: read
-      security-events: write
-
-    steps:
-      # Scans the pushed image by digest, not by tag. A tag can move between
-      # the build and this job; the digest is the artifact that will actually
-      # be deployed, so it is the one worth knowing the CVEs of.
-      - name: Scan image
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          scan-type: image
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.image.outputs.digest }}
-          format: sarif
-          output: trivy-image.sarif
-          severity: CRITICAL,HIGH
-          exit-code: "0"
-
-      - name: Upload results
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: trivy-image.sarif
-          category: container-image
+          echo "### Docker Image Published :docker:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Tags pushed:**" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY

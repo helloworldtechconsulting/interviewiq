@@ -22,7 +22,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 /**
@@ -42,21 +41,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
                 SecurityFilterAutoConfiguration.class
         }
 )
-// RefreshTokenCookie is imported as a REAL bean rather than mocked: the cookie
-// attributes it sets are precisely what the login test asserts, and a mock would
-// let the test pass while shipping a cookie with no HttpOnly flag.
-@Import({com.interviewiq.shared.web.GlobalExceptionHandler.class,
-         RefreshTokenCookie.class,
-         AuthControllerTest.TestConfig.class})
+@Import(com.interviewiq.shared.web.GlobalExceptionHandler.class)
 class AuthControllerTest {
-
-    @org.springframework.boot.test.context.TestConfiguration
-    static class TestConfig {
-        @org.springframework.context.annotation.Bean
-        com.interviewiq.auth.config.SecurityProperties securityProperties() {
-            return new com.interviewiq.auth.config.SecurityProperties();
-        }
-    }
 
     @Autowired MockMvc mockMvc;
     @Autowired ObjectMapper objectMapper;
@@ -123,18 +109,18 @@ class AuthControllerTest {
     // =========================================================================
 
     @Test
-    void login_returnsAccessTokenInBodyAndRefreshTokenInAnHttpOnlyCookie() throws Exception {
-        AuthResponse.WithRefreshToken issued = new AuthResponse.WithRefreshToken(
-                new AuthResponse(
-                        "access.token.jwt",
-                        new UserResponse(UUID.randomUUID(), UUID.randomUUID(),
-                                "Alice Smith", "alice@example.com", UserRole.ADMIN,
-                                true, true, java.time.OffsetDateTime.now(),
-                                java.time.OffsetDateTime.now())),
-                "refresh-uuid");
-        when(authService.login(eq(SLUG), any(), any())).thenReturn(issued);
+    void login_returns200_withTokenPairOnSuccess() throws Exception {
+        AuthResponse response = new AuthResponse(
+                "access.token.jwt",
+                "refresh-uuid",
+                new UserResponse(UUID.randomUUID(), UUID.randomUUID(),
+                        "Alice Smith", "alice@example.com", UserRole.ADMIN,
+                        true, true, java.time.OffsetDateTime.now(),
+                        java.time.OffsetDateTime.now())
+        );
+        when(authService.login(eq(SLUG), any(), any())).thenReturn(response);
 
-        var result = mockMvc.perform(post("/api/v1/{slug}/auth/login", SLUG)
+        mockMvc.perform(post("/api/v1/{slug}/auth/login", SLUG)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -144,19 +130,7 @@ class AuthControllerTest {
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.access_token").value("access.token.jwt"))
-                // PRD v2.1 §7.1.1: the refresh token must never reach JavaScript,
-                // so it must NOT appear in the response body at all.
-                .andExpect(jsonPath("$.data.refresh_token").doesNotExist())
-                .andReturn();
-
-        String setCookie = result.getResponse().getHeader("Set-Cookie");
-        assertThat(setCookie)
-                .as("refresh token must travel in an HTTP-only cookie")
-                .isNotNull()
-                .contains("iiq_refresh=refresh-uuid")
-                .contains("HttpOnly")     // the actual XSS mitigation
-                .contains("Secure")       // never over plaintext
-                .contains("SameSite=None"); // app.* calling api.* is cross-site
+                .andExpect(jsonPath("$.data.refresh_token").value("refresh-uuid"));
     }
 
     @Test

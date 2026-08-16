@@ -36,13 +36,6 @@
         <!-- JaCoCo — code coverage (0.8.12 supports Java 21) -->
         <jacoco.version>0.8.12</jacoco.version>
 
-        <!-- Coverage kill switch: `mvn clean install -DskipTests -DskipCoverage`
-             turns off the agent, the report, and the verify-phase gate together.
-             (JaCoCo's own -Djacoco.skip=true does the same; this is the alias
-             the team already types.) -->
-        <skipCoverage>false</skipCoverage>
-        <gatling.version>3.11.5</gatling.version>
-
         <!-- Newer Testcontainers than Spring Boot 3.3.6 manages (1.19.8), pulling a
              newer docker-java client for modern Docker Engine compatibility. -->
         <testcontainers.version>1.20.6</testcontainers.version>
@@ -171,95 +164,10 @@
             <artifactId>spring-ai-starter-model-openai</artifactId>
         </dependency>
 
-        <!-- ── Spring AI — Anthropic integration ────────────── -->
-        <!--    Both starters are present because PRD v2.1 §9.1 makes vendor a
-                per-workflow configuration value, not a build-time choice. The
-                evaluation vendor is "undecided by design": §13.1 calls for
-                shadow-running the mid tier (now gpt-5.6-terra) against Claude
-                Haiku 4.5 over the first ~50 interviews and selecting on measured
-                score-to-hire correlation.                                       -->
-        <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-starter-model-anthropic</artifactId>
-        </dependency>
-
-        <!-- ── Adding a third provider ──────────────────────── -->
-        <!--    This block is the whole integration. AiConfig resolves
-                app.ai.*.vendor against whatever ChatModel beans exist at runtime
-                and configures them through portable ChatOptions, so a new
-                provider needs a starter here, credentials under spring.ai.*, and
-                a string in application.yml — no Java change, no new abstraction.
-
-                Uncomment to evaluate Gemini. The reason to consider Google is NOT
-                price: Flash-Lite beats the OpenAI nano tier by about Rs.0.05 per
-                interview, which does not justify a third API key. The reason is
-                that Vertex AI publishes per-region ML-processing commitments and
-                asia-south1 (Mumbai) is a Gemini region — which, if confirmed in
-                writing with Google, is the only route found so far to keeping
-                inference in India. Bedrock cannot: Claude in ap-south-1 uses
-                global cross-Region inference. Verify before this reaches the
-                privacy policy.
-
-        <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-starter-model-vertex-ai-gemini</artifactId>
-        </dependency>
-                                                                                 -->
-
-        <!-- ── StringTemplate — prompt templates ────────────── -->
-        <!--    PRD §7.5.1: "Prompts live as StringTemplate .st files under
-                resources/prompts so they can be iterated without a code change."
-                Chosen over string concatenation precisely because prompt
-                iteration is expected to be frequent and shouldn't need a
-                redeploy of compiled code to review a wording change.            -->
-        <dependency>
-            <groupId>org.antlr</groupId>
-            <artifactId>ST4</artifactId>
-            <version>4.3.4</version>
-        </dependency>
-
-        <!-- ── WebSocket — the interview room's signalling channel ─── -->
-        <!--    PRD v2.1 §7.5.2: one connection, eight events, carrying only text
-                and control events. No media crosses it — getUserMedia,
-                MediaRecorder, SpeechSynthesis and SpeechRecognition all run in
-                the candidate's browser, and the 480p recording uploads
-                browser-to-storage by pre-signed URL without touching this
-                server. That is what makes one small pod capable of carrying
-                dozens of simultaneous interviews.                              -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-websocket</artifactId>
-        </dependency>
-
         <!-- ── Micrometer Prometheus registry ───────────────── -->
         <dependency>
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-registry-prometheus</artifactId>
-        </dependency>
-
-        <!-- ── Distributed tracing (PRD v2.1 §8) ─────────────────
-             Micrometer Tracing over OpenTelemetry, exporting OTLP. Bridge and
-             exporter are separate artifacts: the bridge produces spans, the
-             exporter ships them. Disabled by default via a zero sampling
-             probability — see application.yml. -->
-        <dependency>
-            <groupId>io.micrometer</groupId>
-            <artifactId>micrometer-tracing-bridge-otel</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>io.opentelemetry</groupId>
-            <artifactId>opentelemetry-exporter-otlp</artifactId>
-        </dependency>
-
-        <!-- ── Structured logging (PRD v2.1 §8) ──────────────────
-             Spring Boot only gained first-class structured logging in 3.4; on
-             3.3 the encoder is an explicit dependency. Active for deployed
-             profiles only — logback-spring.xml keeps local runs human-readable,
-             because JSON in a developer's terminal is a real cost for no gain. -->
-        <dependency>
-            <groupId>net.logstash.logback</groupId>
-            <artifactId>logstash-logback-encoder</artifactId>
-            <version>7.4</version>
         </dependency>
 
         <!-- ── JWT: API + HMAC/RSA implementation ────────────── -->
@@ -287,21 +195,23 @@
             <artifactId>s3</artifactId>
         </dependency>
 
-        <!-- ── Mail — SMTP via JavaMailSender ─────────────────── -->
-        <!--    Replaces the AWS SES SDK. PRD v2.1 §9.2 and Arch v4.0 §3 make the
-                email provider a configuration value — Resend, Brevo, Postmark or
-                SES-over-SMTP all speak SMTP. The PRD is candid that portable SMTP
-                costs more than SES for the same deliverability, and accepts that
-                as a real cost of portability.                                    -->
+        <!-- ── AWS SDK v2: SES ────────────────────────────────── -->
         <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-mail</artifactId>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>ses</artifactId>
         </dependency>
 
-        <!-- Transcribe Streaming and Polly were removed with the March design:  -->
-        <!-- speech-to-text and text-to-speech both run in the candidate's        -->
-        <!-- browser via the Web Speech API (PRD v2.1 §7.5.2). No server-side     -->
-        <!-- media processing exists anywhere in this application.                -->
+        <!-- ── AWS SDK v2: Transcribe Streaming ──────────────── -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>transcribestreaming</artifactId>
+        </dependency>
+
+        <!-- ── AWS SDK v2: Polly ─────────────────────────────── -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>polly</artifactId>
+        </dependency>
 
         <!-- ── Apache Tika: document text extraction ─────────── -->
         <!--    tika-core: lightweight API + AutoDetectParser      -->
@@ -413,14 +323,6 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
-                    <!-- Pinned rather than discovered. Left unset, `repackage`
-                         scans the packaged classes for a main method, and that
-                         scan comes up empty ("Unable to find main class") if
-                         anything rewrites target/classes mid-build — IntelliJ's
-                         auto-build compiles a Maven module into this same
-                         directory. Naming the class skips the scan. -->
-                    <mainClass>com.interviewiq.InterviewIqApplication</mainClass>
-
                     <!-- Exclude Lombok from the final fat JAR -->
                     <excludes>
                         <exclude>
@@ -461,38 +363,6 @@
                 </configuration>
             </plugin>
 
-            <!-- Failsafe — runs the Testcontainers integration tests (*IT).
-
-                 Added because they were not running anywhere. Surefire skips
-                 *IT by naming convention and no Failsafe execution was bound,
-                 so every *IT class in this repo was compiled and then never
-                 executed: the schema-mapping check that catches an entity
-                 drifting from its migration, the SKIP LOCKED claiming test,
-                 the wallet reservation expiry test. Passing CI meant nothing
-                 about any of them.
-
-                 Bound to verify, so `mvn test` stays fast for local loops and
-                 `mvn verify` is the gate. Needs a Docker daemon; CI runners
-                 have one. -->
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-failsafe-plugin</artifactId>
-                <configuration>
-                    <systemPropertyVariables>
-                        <api.version>${docker.api.version}</api.version>
-                    </systemPropertyVariables>
-                </configuration>
-                <executions>
-                    <execution>
-                        <id>integration-tests</id>
-                        <goals>
-                            <goal>integration-test</goal>
-                            <goal>verify</goal>
-                        </goals>
-                    </execution>
-                </executions>
-            </plugin>
-
             <!-- JaCoCo — code coverage report from the unit-test (Surefire) run.
                  `prepare-agent` wires the coverage agent into Surefire's argLine;
                  `report` renders target/site/jacoco/index.html after the test phase.
@@ -504,7 +374,6 @@
                 <artifactId>jacoco-maven-plugin</artifactId>
                 <version>${jacoco.version}</version>
                 <configuration>
-                    <skip>${skipCoverage}</skip>
                     <excludes>
                         <exclude>**/InterviewIqApplication.*</exclude>
                         <exclude>**/dto/**</exclude>
@@ -595,89 +464,5 @@
             </snapshots>
         </pluginRepository>
     </pluginRepositories>
-
-    <!-- =====================================================================
-         Load test (INTIQ-99)
-
-         In a profile, not the default build. The simulation drives a real
-         deployed environment over HTTP and WebSocket; it is not something a
-         `mvn verify` should ever start.
-
-             ./mvnw gatling:test -Pload-test \
-                 -Dgatling.simulationClass=com.interviewiq.load.InterviewRoomSimulation \
-                 -Dload.baseUrl=https://api-staging.interviewiq.in \
-                 -Dload.concurrentInterviews=25
-
-         See src/test/resources/load/README.md for how to seed the tokens it
-         feeds on.
-         ===================================================================== -->
-    <profiles>
-        <profile>
-            <id>load-test</id>
-
-            <dependencies>
-                <dependency>
-                    <groupId>io.gatling.highcharts</groupId>
-                    <artifactId>gatling-charts-highcharts</artifactId>
-                    <version>${gatling.version}</version>
-                    <scope>test</scope>
-                </dependency>
-            </dependencies>
-
-            <build>
-                <plugins>
-                    <!-- Simulations live in src/gatling, not src/test/java.
-
-                         They have to: the Gatling dependency is scoped to this
-                         profile, so a simulation under src/test/java would fail
-                         every ordinary `mvn verify` with "package
-                         io.gatling.javaapi.core does not exist". This source
-                         root only exists when the profile is active. -->
-                    <plugin>
-                        <groupId>org.codehaus.mojo</groupId>
-                        <artifactId>build-helper-maven-plugin</artifactId>
-                        <version>3.6.0</version>
-                        <executions>
-                            <execution>
-                                <id>add-gatling-sources</id>
-                                <phase>generate-test-sources</phase>
-                                <goals>
-                                    <goal>add-test-source</goal>
-                                </goals>
-                                <configuration>
-                                    <sources>
-                                        <source>src/gatling/java</source>
-                                    </sources>
-                                </configuration>
-                            </execution>
-                            <execution>
-                                <id>add-gatling-resources</id>
-                                <phase>generate-test-resources</phase>
-                                <goals>
-                                    <goal>add-test-resource</goal>
-                                </goals>
-                                <configuration>
-                                    <resources>
-                                        <resource>
-                                            <directory>src/gatling/resources</directory>
-                                        </resource>
-                                    </resources>
-                                </configuration>
-                            </execution>
-                        </executions>
-                    </plugin>
-
-                    <plugin>
-                        <groupId>io.gatling</groupId>
-                        <artifactId>gatling-maven-plugin</artifactId>
-                        <version>4.9.6</version>
-                        <configuration>
-                            <simulationClass>com.interviewiq.load.InterviewRoomSimulation</simulationClass>
-                        </configuration>
-                    </plugin>
-                </plugins>
-            </build>
-        </profile>
-    </profiles>
 
 </project>
