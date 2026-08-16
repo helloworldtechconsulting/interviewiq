@@ -34,7 +34,7 @@
         <spring-ai.version>1.0.0</spring-ai.version>
 
         <!-- JaCoCo — code coverage (0.8.12 supports Java 21) -->
-        <jacoco.version>0.8.12</jacoco.version>
+        <jacoco.version>0.8.15</jacoco.version>
 
         <!-- Coverage kill switch: `mvn clean install -DskipTests -DskipCoverage`
              turns off the agent, the report, and the verify-phase gate together.
