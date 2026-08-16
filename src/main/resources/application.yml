@@ -10,7 +10,7 @@
 spring:
 
   application:
-    name: interviewiq-backend
+    name: interviewengine-backend
 
   # ── Virtual threads (Java 21) ──────────────────────────────────────────────
   threads:
@@ -30,7 +30,7 @@ spring:
   datasource:
     driver-class-name: org.postgresql.Driver
     hikari:
-      pool-name:            InterviewIQ-HikariPool
+      pool-name:            InterviewEngine-HikariPool
       maximum-pool-size:    10
       minimum-idle:         2
       idle-timeout:         30000     # 30 s
@@ -168,7 +168,7 @@ logging:
   # profiles emit one JSON object per line; local stays human-readable.
   level:
     root:                           INFO
-    com.interviewiq:                INFO
+    com.interviewengine:                INFO
     org.springframework.security:   WARN
     org.hibernate.SQL:              WARN
     org.flywaydb:                   INFO
@@ -229,8 +229,8 @@ app:
   # Host and credentials live under spring.mail.*; domain verification with
   # DKIM, SPF and DMARC is launch-blocking whichever provider is chosen.
   mail:
-    from-address: noreply@interviewiq.in
-    from-name: InterviewIQ
+    from-address: noreply@interviewengine.ai
+    from-name: InterviewEngine
     use-local-stub: false
 
     # ── Bounce / complaint callbacks (INTIQ-32, §13.3) ──────────────────────

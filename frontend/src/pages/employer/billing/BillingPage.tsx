@@ -138,7 +138,7 @@ function TopupDialog({ open, onOpenChange }: TopupDialogProps) {
           key: order.keyId,
           amount: order.amountPaise,
           currency: order.currency,
-          name: "InterviewIQ",
+          name: "InterviewEngine",
           description: "Wallet Top-up",
           order_id: order.razorpayOrderId,
           prefill: { email: user?.email },

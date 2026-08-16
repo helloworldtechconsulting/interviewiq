@@ -1,6 +1,6 @@
 -- =============================================================================
 -- V020__core_add_query_indexes.sql
--- purpose: production query performance indexes across the InterviewIQ schema
+-- purpose: production query performance indexes across the InterviewEngine schema
 --
 -- SKIPPED INDEXES (already created by UNIQUE constraints):
 --   evaluation_reports.session_id    → uq_evaluation_reports_session

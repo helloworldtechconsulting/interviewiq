@@ -1,5 +1,5 @@
 # =============================================================================
-# ci.yml — InterviewIQ backend continuous integration
+# ci.yml — InterviewEngine backend continuous integration
 #
 #   test ──▶ dependency-scan ──▶ image ──▶ image-scan
 #
@@ -26,7 +26,7 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}/interviewiq-backend
+  IMAGE_NAME: ${{ github.repository }}/interviewengine-backend
 
 jobs:
 

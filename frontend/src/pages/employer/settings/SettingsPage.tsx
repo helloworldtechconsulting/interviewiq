@@ -294,7 +294,7 @@ export function SettingsPage() {
                   size="sm"
                   className="w-full"
                   onClick={() =>
-                    window.open("mailto:support@interviewiq.ai", "_blank")
+                    window.open("mailto:support@interviewengine.ai", "_blank")
                   }
                 >
                   Contact Support

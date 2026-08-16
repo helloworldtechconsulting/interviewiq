@@ -8,7 +8,7 @@ export function InterviewLayout() {
       <header className="flex h-14 items-center border-b px-6">
         <div className="flex items-center gap-2">
           <BrainCircuit className="h-5 w-5 text-primary" />
-          <span className="font-semibold">InterviewIQ</span>
+          <span className="font-semibold">InterviewEngine</span>
         </div>
         <div className="ml-auto text-sm text-muted-foreground">
           Candidate Interview Portal

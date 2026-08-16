@@ -17,8 +17,8 @@
 -- ensure reruns are harmless.
 --
 -- SEED CONTENTS:
---   1. One test company  — "InterviewIQ Dev"  (slug: interviewiq-dev)
---   2. One admin user    — admin@dev.interviewiq.ai  (password: "password")
+--   1. One test company  — "InterviewEngine Dev"  (slug: interviewengine-dev)
+--   2. One admin user    — admin@dev.interviewengine.ai  (password: "password")
 --   3. One funded wallet — ₹500 starting balance (50,000 paise)
 --
 -- FIXED UUIDs: deterministic IDs allow application integration tests to
@@ -50,9 +50,9 @@ INSERT INTO companies (
 )
 VALUES (
     '00000000-0000-0000-0000-000000000001',
-    'InterviewIQ Dev',
-    'interviewiq-dev',
-    'dev.interviewiq.ai',
+    'InterviewEngine Dev',
+    'interviewengine-dev',
+    'dev.interviewengine.ai',
     'ACTIVE',
     now(),
     now()
@@ -73,7 +73,7 @@ ON CONFLICT (id) DO NOTHING;
 -- FK children (sessions, etc.) are CASCADE-deleted or SET NULL per schema DDL.
 DELETE FROM users
 WHERE company_id = '00000000-0000-0000-0000-000000000001'
-  AND email      = 'admin@dev.interviewiq.ai'
+  AND email      = 'admin@dev.interviewengine.ai'
   AND id        != '00000000-0000-0000-0000-000000000002';
 
 INSERT INTO users (
@@ -93,7 +93,7 @@ VALUES (
     '00000000-0000-0000-0000-000000000002',
     '00000000-0000-0000-0000-000000000001',
     'Dev Admin',
-    'admin@dev.interviewiq.ai',
+    'admin@dev.interviewengine.ai',
     '$2b$10$lMrOOPrLFSx1d7P3PQ5Qsum5MkNWPfN5Tz5D2Z.UX5W0a/Jzjpeuq',
     NULL,
     'ADMIN',

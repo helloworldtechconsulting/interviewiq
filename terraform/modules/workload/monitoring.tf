@@ -47,7 +47,7 @@ resource "helm_release" "kube_prometheus_stack" {
         # those Deployments would go on being ignored — which is what they were
         # doing before this file existed.
         additionalScrapeConfigs = [{
-          job_name = "interviewiq-pods"
+          job_name = "interviewengine-pods"
           kubernetes_sd_configs = [{
             role = "pod"
           }]
@@ -155,7 +155,7 @@ resource "kubernetes_manifest" "alert_rules" {
     apiVersion = "monitoring.coreos.com/v1"
     kind       = "PrometheusRule"
     metadata = {
-      name      = "interviewiq-alerts"
+      name      = "interviewengine-alerts"
       namespace = kubernetes_namespace_v1.monitoring[0].metadata[0].name
       labels = merge(local.common_labels, {
         # The chart's Prometheus only picks up rules carrying its release label.
@@ -165,7 +165,7 @@ resource "kubernetes_manifest" "alert_rules" {
     spec = {
       groups = [
         {
-          name = "interviewiq.slo"
+          name = "interviewengine.slo"
           rules = [
             # ── The one number the product promises ─────────────────────────
             {
@@ -174,7 +174,7 @@ resource "kubernetes_manifest" "alert_rules" {
               # leaves room to act before the promise is actually broken —
               # an alert that fires exactly at the SLA boundary is a
               # notification of failure, not a chance to prevent it.
-              expr   = "interviewiq_evaluation_queue_oldest_age_seconds > 1200"
+              expr   = "interviewengine_evaluation_queue_oldest_age_seconds > 1200"
               for    = "5m"
               labels = { severity = "critical" }
               annotations = {
@@ -184,7 +184,7 @@ resource "kubernetes_manifest" "alert_rules" {
             },
             {
               alert  = "EvaluationQueueGrowing"
-              expr   = "interviewiq_evaluation_queue_depth > 50"
+              expr   = "interviewengine_evaluation_queue_depth > 50"
               for    = "15m"
               labels = { severity = "warning" }
               annotations = {
@@ -195,7 +195,7 @@ resource "kubernetes_manifest" "alert_rules" {
           ]
         },
         {
-          name = "interviewiq.saturation"
+          name = "interviewengine.saturation"
           rules = [
             # ── The failure the connection budget guards against ────────────
             {
@@ -235,11 +235,11 @@ resource "kubernetes_manifest" "alert_rules" {
           ]
         },
         {
-          name = "interviewiq.availability"
+          name = "interviewengine.availability"
           rules = [
             {
               alert  = "WebDeploymentDegraded"
-              expr   = "kube_deployment_status_replicas_available{deployment=\"interviewiq-web\"} < 2"
+              expr   = "kube_deployment_status_replicas_available{deployment=\"interviewengine-web\"} < 2"
               for    = "10m"
               labels = { severity = "critical" }
               annotations = {
@@ -249,7 +249,7 @@ resource "kubernetes_manifest" "alert_rules" {
             },
             {
               alert  = "WorkerDeploymentDown"
-              expr   = "kube_deployment_status_replicas_available{deployment=\"interviewiq-worker\"} < 1"
+              expr   = "kube_deployment_status_replicas_available{deployment=\"interviewengine-worker\"} < 1"
               for    = "10m"
               labels = { severity = "critical" }
               annotations = {

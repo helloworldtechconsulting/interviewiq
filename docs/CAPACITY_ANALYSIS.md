@@ -1,4 +1,4 @@
-# InterviewIQ — Concurrency & Capacity Analysis
+# InterviewEngine — Concurrency & Capacity Analysis
 
 **Date:** 1 August 2026
 **Question:** does capping HikariCP at 8 connections per task limit us to 8 concurrent interviews? Target is 25+ concurrent at MVP launch.

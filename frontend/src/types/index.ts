@@ -1,5 +1,5 @@
 // =============================================================================
-// types/index.ts — All domain types mirroring the InterviewIQ backend API
+// types/index.ts — All domain types mirroring the InterviewEngine backend API
 // =============================================================================
 
 // ── Shared / Pagination ───────────────────────────────────────────────────────
@@ -26,7 +26,7 @@ export interface ApiError {
 // ── Enums ─────────────────────────────────────────────────────────────────────
 
 /**
- * PLATFORM_STAFF is InterviewIQ's own staff, not a customer role (V053). It is
+ * PLATFORM_STAFF is InterviewEngine's own staff, not a customer role (V053). It is
  * the only value that unlocks the platform console, and no customer-facing
  * screen should ever offer it as a choice.
  */

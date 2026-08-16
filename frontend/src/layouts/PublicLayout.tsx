@@ -11,7 +11,7 @@ export function PublicLayout() {
       <header className="flex h-14 items-center px-6">
         <div className="flex items-center gap-2">
           <BrainCircuit className="h-6 w-6 text-primary" />
-          <span className="text-lg font-bold tracking-tight">InterviewIQ</span>
+          <span className="text-lg font-bold tracking-tight">InterviewEngine</span>
         </div>
       </header>
 
@@ -21,7 +21,7 @@ export function PublicLayout() {
       </main>
 
       <footer className="py-4 text-center text-xs text-muted-foreground">
-        © {new Date().getFullYear()} InterviewIQ. All rights reserved.
+        © {new Date().getFullYear()} InterviewEngine. All rights reserved.
       </footer>
     </div>
   );

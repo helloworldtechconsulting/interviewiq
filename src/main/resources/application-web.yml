@@ -6,8 +6,8 @@
 # PRD v2.1, Implementation Architecture Decisions §4. Two Kubernetes Deployments
 # are built from ONE image and distinguished only by Spring profile:
 #
-#   interviewiq-web     schedulers DISABLED  serves REST + WebSocket  HPA on request rate  min 2
-#   interviewiq-worker  schedulers ENABLED   serves nothing           KEDA on queue depth  min 1
+#   interviewengine-web     schedulers DISABLED  serves REST + WebSocket  HPA on request rate  min 2
+#   interviewengine-worker  schedulers ENABLED   serves nothing           KEDA on queue depth  min 1
 #
 # "A @ConditionalOnProperty on the scheduler beans is the whole implementation."
 #

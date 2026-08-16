@@ -1,9 +1,9 @@
-# InterviewIQ — Pending & Unimplemented Items
+# InterviewEngine — Pending & Unimplemented Items
 
 **Audit date:** 1 August 2026
-**Repo:** `/Users/sps/code/interviewiq` — branch `master`, 2 commits
+**Repo:** `/Users/sps/code/interviewengine` — branch `master`, 2 commits
 **Scale:** 152 Java files (~11.2k LOC) · 63 TS/TSX files (~8.8k LOC) · 22 Flyway migrations · 5 backend test classes · 0 frontend tests
-**Baseline:** InterviewIQ MVP PRD v1.0 (Mar 2026), MVP API Reference (Apr 2026), AWS MVP Architecture (Apr 2026)
+**Baseline:** InterviewEngine MVP PRD v1.0 (Mar 2026), MVP API Reference (Apr 2026), AWS MVP Architecture (Apr 2026)
 
 ---
 
@@ -65,7 +65,7 @@ These are live bugs, not gaps.
 | 2.6 | **High** | **Frontend does not compile.** `CandidatesPage.tsx:276-281` and `JobDetailPage.tsx:80` pass `status`/`jobId` to `candidatesApi.list`, which accepts neither → `tsc` excess-property errors under `strict`. Both filters are also silently dead at runtime. | `frontend/src/pages/employer/candidates/CandidatesPage.tsx`, `.../jobs/JobDetailPage.tsx`, `api/modules/candidates.ts:13-17` |
 | 2.7 | **High** | **No file size or MIME validation on any upload path.** Backend accepts any `contentType` and silently maps unknown types to `""`; pre-signed PUTs carry no content-length-range condition; `upload-confirm` accepts a **client-supplied S3 key with no ownership/prefix check** (a caller can point their job at any object in the bucket). Frontend checks nothing beyond the HTML `accept` attribute. Spec limits: JD 10MB, resume 5MB, logo 2MB, recording 500MB. | `job/service/JobService.java:129-176`, `candidate/service/CandidateService.java:123-169`, `frontend` upload handlers |
 | 2.8 | Medium | **Swagger UI is `permitAll` in production.** `OpenApiConfig` acknowledges this and recommends a conditional bean — not implemented. | `auth/config/SecurityConfig.java:157-158` |
-| 2.9 | Medium | **`VITE_COMPANY_SLUG` is not a Docker build arg** — production frontend images silently point auth at the literal `interviewiq-dev` tenant. | `frontend/Dockerfile:12-13` |
+| 2.9 | Medium | **`VITE_COMPANY_SLUG` is not a Docker build arg** — production frontend images silently point auth at the literal `interviewengine-dev` tenant. | `frontend/Dockerfile:12-13` |
 | 2.10 | Medium | **Question-generation failure loop.** A response outside 8–12 questions passes the Java validator (which only checks "is this parseable JSON"), then trips the DB CHECK at flush. The `catch` block saves `FAILED` **inside the same doomed transaction**, so the marker never persists and the session re-polls forever. | `ai/service/QuestionGenerationWorker.java:118,186-196`, `V024` |
 | 2.11 | Medium | **nginx security headers are silently dropped on every route.** Server-level `add_header` is not inherited by locations that declare their own; both `/assets/` and `/` set `Cache-Control`, nullifying `X-Frame-Options`, `X-Content-Type-Options` and `Referrer-Policy`. Also no CSP, no HSTS, no `client_max_body_size` (nginx default 1MB will reject the 10MB JD upload if it ever routes through nginx). | `frontend/nginx.conf:15-19,31-39` |
 | 2.12 | Medium | **Refresh token stored in `localStorage`** and passed in the JSON body. Spec requires an HTTP-only secure cookie; `client.ts` sets `withCredentials: false`. | `frontend/src/stores/authStore.ts:17,66`, `auth/dto/RefreshRequest.java` |
@@ -91,7 +91,7 @@ These are live bugs, not gaps.
 | Rate limit | 5 failed logins/IP/min → 15-min lockout | 20-burst / 10-per-min per-IP over **all** `/api/v1/**`; no lockout columns exist | `RateLimitFilter.java`, `SecurityConfig.java:65-74` |
 | Top-up presets | ₹500/1000/2500/5000/10000 | `@Min(5000 paise)` = ₹50 floor, no ceiling, no enum; UI shows 500/1000/2000/5000 | `TopUpRequest.java:13`, `BillingPage.tsx:68` |
 | Base URL | `/api/...` | `/api/v1/...`, and auth is `/api/v1/{companySlug}/auth/...` | every controller |
-| Domain | `interviewiq.in` | `interviewiq.ai` in config/emails | `application.yml:139`, `docker-compose.yml:100` |
+| Domain | `interviewengine.ai` | `interviewengine.ai` in config/emails | `application.yml:139`, `docker-compose.yml:100` |
 | Secrets | SSM Parameter Store | **Environment variables everywhere**, incl. the RSA private key and static AWS access keys | `application-prod.yml:24-103`, `docker-compose.yml:78-97`, `.env.example` |
 | Container registry | ECR | GHCR | `ci.yml:44-45` |
 

@@ -15,7 +15,7 @@ resource "kubernetes_namespace_v1" "app" {
 
 resource "kubernetes_config_map_v1" "app" {
   metadata {
-    name      = "interviewiq-config"
+    name      = "interviewengine-config"
     namespace = var.namespace
   }
 
@@ -56,7 +56,7 @@ resource "kubernetes_manifest" "app_external_secret" {
     apiVersion = "external-secrets.io/v1beta1"
     kind       = "ExternalSecret"
     metadata = {
-      name      = "interviewiq-secrets"
+      name      = "interviewengine-secrets"
       namespace = var.namespace
     }
     spec = {
@@ -66,29 +66,29 @@ resource "kubernetes_manifest" "app_external_secret" {
         kind = "ClusterSecretStore"
       }
       target = {
-        name           = "interviewiq-secrets"
+        name           = "interviewengine-secrets"
         creationPolicy = "Owner"
       }
       data = [
         # RSA signing keys. These MUST be injected rather than generated at
         # startup: an ephemeral key pair invalidates every live token on every
         # deploy, which was a ship-blocking defect in staging.
-        { secretKey = "APP_SECURITY_JWT_PRIVATE_KEY_PEM", remoteRef = { key = "interviewiq/jwt-private-key" } },
-        { secretKey = "APP_SECURITY_JWT_PUBLIC_KEY_PEM", remoteRef = { key = "interviewiq/jwt-public-key" } },
+        { secretKey = "APP_SECURITY_JWT_PRIVATE_KEY_PEM", remoteRef = { key = "interviewengine/jwt-private-key" } },
+        { secretKey = "APP_SECURITY_JWT_PUBLIC_KEY_PEM", remoteRef = { key = "interviewengine/jwt-public-key" } },
         # Same reasoning: a regenerated invite secret invalidates every
         # outstanding candidate invite link.
-        { secretKey = "APP_SECURITY_INVITE_SECRET", remoteRef = { key = "interviewiq/invite-secret" } },
+        { secretKey = "APP_SECURITY_INVITE_SECRET", remoteRef = { key = "interviewengine/invite-secret" } },
 
-        { secretKey = "OPENAI_API_KEY", remoteRef = { key = "interviewiq/openai-api-key" } },
-        { secretKey = "ANTHROPIC_API_KEY", remoteRef = { key = "interviewiq/anthropic-api-key" } },
+        { secretKey = "OPENAI_API_KEY", remoteRef = { key = "interviewengine/openai-api-key" } },
+        { secretKey = "ANTHROPIC_API_KEY", remoteRef = { key = "interviewengine/anthropic-api-key" } },
 
-        { secretKey = "RAZORPAY_KEY_ID", remoteRef = { key = "interviewiq/razorpay-key-id" } },
-        { secretKey = "RAZORPAY_KEY_SECRET", remoteRef = { key = "interviewiq/razorpay-key-secret" } },
+        { secretKey = "RAZORPAY_KEY_ID", remoteRef = { key = "interviewengine/razorpay-key-id" } },
+        { secretKey = "RAZORPAY_KEY_SECRET", remoteRef = { key = "interviewengine/razorpay-key-secret" } },
 
-        { secretKey = "SMTP_HOST", remoteRef = { key = "interviewiq/smtp-host" } },
-        { secretKey = "SMTP_USERNAME", remoteRef = { key = "interviewiq/smtp-username" } },
-        { secretKey = "SMTP_PASSWORD", remoteRef = { key = "interviewiq/smtp-password" } },
-        { secretKey = "MAIL_FROM_ADDRESS", remoteRef = { key = "interviewiq/mail-from-address" } },
+        { secretKey = "SMTP_HOST", remoteRef = { key = "interviewengine/smtp-host" } },
+        { secretKey = "SMTP_USERNAME", remoteRef = { key = "interviewengine/smtp-username" } },
+        { secretKey = "SMTP_PASSWORD", remoteRef = { key = "interviewengine/smtp-password" } },
+        { secretKey = "MAIL_FROM_ADDRESS", remoteRef = { key = "interviewengine/mail-from-address" } },
       ]
     }
   }
@@ -106,7 +106,7 @@ resource "kubernetes_manifest" "app_external_secret" {
 
 resource "kubernetes_secret_v1" "app" {
   metadata {
-    name      = "interviewiq-platform-secrets"
+    name      = "interviewengine-platform-secrets"
     namespace = var.namespace
   }
 

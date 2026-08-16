@@ -13,7 +13,7 @@ terraform {
   required_version = ">= 1.6"
 
   backend "gcs" {
-    bucket = "interviewiq-tfstate-production"
+    bucket = "interviewengine-tfstate-production"
     prefix = "production"
   }
 

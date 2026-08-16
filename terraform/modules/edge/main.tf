@@ -82,7 +82,7 @@ resource "cloudflare_zone_settings_override" "settings" {
 
 resource "cloudflare_ruleset" "waf" {
   zone_id = var.zone_id
-  name    = "interviewiq-waf"
+  name    = "interviewengine-waf"
   kind    = "zone"
   phase   = "http_request_firewall_custom"
 
@@ -124,7 +124,7 @@ resource "cloudflare_ruleset" "waf" {
 
 resource "cloudflare_ruleset" "cache" {
   zone_id = var.zone_id
-  name    = "interviewiq-cache"
+  name    = "interviewengine-cache"
   kind    = "zone"
   phase   = "http_request_cache_settings"
 

@@ -30,7 +30,7 @@
 
     <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
 
-    <springProperty scope="context" name="appName" source="spring.application.name" defaultValue="interviewiq"/>
+    <springProperty scope="context" name="appName" source="spring.application.name" defaultValue="interviewengine"/>
     <springProperty scope="context" name="activeProfiles" source="spring.profiles.active" defaultValue="default"/>
 
     <!-- ── Local development: human-readable ──────────────────────────────── -->

@@ -19,11 +19,11 @@
     <!-- =========================================================
          PROJECT COORDINATES
          ========================================================= -->
-    <groupId>com.interviewiq</groupId>
-    <artifactId>interviewiq-backend</artifactId>
+    <groupId>com.interviewengine</groupId>
+    <artifactId>interviewengine-backend</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <packaging>jar</packaging>
-    <name>InterviewIQ Backend</name>
+    <name>InterviewEngine Backend</name>
     <description>AI-powered interview platform backend — Spring Boot 3.3 / PostgreSQL 15</description>
 
     <!-- =========================================================
@@ -419,7 +419,7 @@
                          anything rewrites target/classes mid-build — IntelliJ's
                          auto-build compiles a Maven module into this same
                          directory. Naming the class skips the scan. -->
-                    <mainClass>com.interviewiq.InterviewIqApplication</mainClass>
+                    <mainClass>com.interviewengine.InterviewEngineApplication</mainClass>
 
                     <!-- Exclude Lombok from the final fat JAR -->
                     <excludes>
@@ -506,7 +506,7 @@
                 <configuration>
                     <skip>${skipCoverage}</skip>
                     <excludes>
-                        <exclude>**/InterviewIqApplication.*</exclude>
+                        <exclude>**/InterviewEngineApplication.*</exclude>
                         <exclude>**/dto/**</exclude>
                         <exclude>**/domain/**</exclude>
                         <exclude>**/config/**</exclude>
@@ -544,9 +544,9 @@
                                 <rule>
                                     <element>CLASS</element>
                                     <includes>
-                                        <include>com.interviewiq.session.scheduler.SessionExpiryJob</include>
-                                        <include>com.interviewiq.session.service.SessionExpiryService</include>
-                                        <include>com.interviewiq.billing.service.StrandedReservationCleanupRunner</include>
+                                        <include>com.interviewengine.session.scheduler.SessionExpiryJob</include>
+                                        <include>com.interviewengine.session.service.SessionExpiryService</include>
+                                        <include>com.interviewengine.billing.service.StrandedReservationCleanupRunner</include>
                                     </includes>
                                     <limits>
                                         <limit>
@@ -604,8 +604,8 @@
          `mvn verify` should ever start.
 
              ./mvnw gatling:test -Pload-test \
-                 -Dgatling.simulationClass=com.interviewiq.load.InterviewRoomSimulation \
-                 -Dload.baseUrl=https://api-staging.interviewiq.in \
+                 -Dgatling.simulationClass=com.interviewengine.load.InterviewRoomSimulation \
+                 -Dload.baseUrl=https://api-staging.interviewengine.ai \
                  -Dload.concurrentInterviews=25
 
          See src/test/resources/load/README.md for how to seed the tokens it
@@ -672,7 +672,7 @@
                         <artifactId>gatling-maven-plugin</artifactId>
                         <version>4.9.6</version>
                         <configuration>
-                            <simulationClass>com.interviewiq.load.InterviewRoomSimulation</simulationClass>
+                            <simulationClass>com.interviewengine.load.InterviewRoomSimulation</simulationClass>
                         </configuration>
                     </plugin>
                 </plugins>

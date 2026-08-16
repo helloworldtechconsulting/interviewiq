@@ -230,7 +230,7 @@ apiClient.interceptors.response.use(
 
     try {
       // Company slug must match the backend route: POST /api/v1/{slug}/auth/refresh
-      const slug = import.meta.env.VITE_COMPANY_SLUG ?? "interviewiq-dev";
+      const slug = import.meta.env.VITE_COMPANY_SLUG ?? "interviewengine-dev";
 
       // Raw axios (not apiClient) to avoid interceptor loops.
       //

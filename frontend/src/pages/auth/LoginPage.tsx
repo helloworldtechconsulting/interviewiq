@@ -111,7 +111,7 @@ export function LoginPage() {
     <Card className="w-full max-w-md">
       <CardHeader className="text-center">
         <CardTitle className="text-2xl">Welcome back</CardTitle>
-        <CardDescription>Sign in to your InterviewIQ account</CardDescription>
+        <CardDescription>Sign in to your InterviewEngine account</CardDescription>
       </CardHeader>
 
       <form onSubmit={handleSubmit(onSubmit)} noValidate>

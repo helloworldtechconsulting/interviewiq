@@ -1,4 +1,4 @@
-# InterviewIQ
+# InterviewEngine
 
 **AI-powered interview platform** that streamlines the hiring process for employers and candidates — from job posting and candidate management to live AI-assisted interview sessions with automated billing.
 
@@ -78,8 +78,8 @@
 **1. Clone the repository**
 
 ```bash
-git clone https://github.com/your-username/interviewiq.git
-cd interviewiq
+git clone https://github.com/your-username/interviewengine.git
+cd interviewengine
 ```
 
 **2. Start PostgreSQL via Docker**
@@ -92,7 +92,7 @@ docker compose up -d
 
 The repository ships with `src/main/resources/application-local.yml` pre-configured for local Docker Compose. All required properties already have safe local defaults:
 
-- Database connects to `localhost:5432/interviewiq_dev` (Docker credentials)
+- Database connects to `localhost:5432/interviewengine_dev` (Docker credentials)
 - OpenAI API key is set to a stub value — replace with a real key only if you need to test AI features
 - JWT keys are empty strings, which auto-generates an ephemeral RSA key pair at startup
 - AWS is stubbed (`use-local-stub: true`) — no real S3 or SES calls are made
@@ -148,10 +148,10 @@ This starts:
 ## Project Structure
 
 ```
-interviewiq/
+interviewengine/
 ├── src/
 │   └── main/
-│       └── java/com/interviewiq/
+│       └── java/com/interviewengine/
 │           ├── ai/           # AI session & prompt logic
 │           ├── auth/         # Authentication & JWT
 │           ├── billing/      # Razorpay payment integration

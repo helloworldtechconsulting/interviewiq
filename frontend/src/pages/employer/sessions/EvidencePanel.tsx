@@ -212,7 +212,7 @@ export function EvidencePanel({ evidence, answers, partial }: EvidencePanelProps
         <CardContent className="flex gap-3 pt-4 text-xs text-muted-foreground">
           <Info className="h-4 w-4 shrink-0" />
           <p>
-            This score is <strong>advisory only</strong>. InterviewIQ does not reject or
+            This score is <strong>advisory only</strong>. InterviewEngine does not reject or
             advance any candidate on its own — a human recruiter makes every hiring
             decision. Use this report as one input alongside your own judgement.
           </p>

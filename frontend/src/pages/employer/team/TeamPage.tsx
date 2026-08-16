@@ -79,12 +79,12 @@ const ROLE_META: Record<
     icon: <Eye className="h-3 w-3" />,
     colour: "bg-gray-100 text-gray-700",
   },
-  // Never assignable from this page — PLATFORM_STAFF is an InterviewIQ
+  // Never assignable from this page — PLATFORM_STAFF is an InterviewEngine
   // employee, not a member of the customer's team. It appears here only
   // because the map is keyed on the full UserRole union, and a staff account
   // viewing this list should render as something rather than crash.
   PLATFORM_STAFF: {
-    label: "InterviewIQ Staff",
+    label: "InterviewEngine Staff",
     icon: <ShieldCheck className="h-3 w-3" />,
     colour: "bg-amber-100 text-amber-800",
   },

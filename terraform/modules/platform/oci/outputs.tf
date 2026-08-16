@@ -17,12 +17,12 @@ output "kubeconfig" {
 
 output "postgres_url" {
   sensitive = true
-  value     = "jdbc:postgresql://${oci_psql_db_system.postgres.network_details[0].primary_db_endpoint_private_ip}:5432/interviewiq"
+  value     = "jdbc:postgresql://${oci_psql_db_system.postgres.network_details[0].primary_db_endpoint_private_ip}:5432/interviewengine"
 }
 
 output "postgres_username" {
   sensitive = true
-  value     = "interviewiq"
+  value     = "interviewengine"
 }
 
 output "postgres_password" {
