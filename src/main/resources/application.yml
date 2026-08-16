@@ -68,38 +68,10 @@ spring:
   # ── Spring AI ──────────────────────────────────────────────────────────────
   ai:
     openai:
-      # Model and temperature are NOT set here. PRD v2.1 §9.1 makes vendor and
-      # model a per-workflow choice (see app.ai below), so a single global model
-      # would be the wrong shape — and gpt-4o, which was set here, is no longer
-      # on the price list.
-      api-key: ${OPENAI_API_KEY:}
-
-      # ── The cheap-provider escape hatch ──────────────────────────────────
-      # Most low-cost inference providers speak the OpenAI wire protocol:
-      # DeepSeek, Groq, Together, Fireworks, OpenRouter, and a local Ollama or
-      # vLLM all expose /v1/chat/completions. Pointing this at one of them, with
-      # that provider's key and its model IDs in app.ai.*.model, moves every
-      # workflow across without a new starter, a new dependency, or a Java
-      # change — an env var and a redeploy.
-      #
-      #   OPENAI_BASE_URL=https://api.deepseek.com
-      #   OPENAI_API_KEY=<their key>
-      #   APP_AI_QUESTION_MODEL=deepseek-chat
-      #
-      # This is a different mechanism from app.ai.*.vendor, and worth keeping
-      # straight. `vendor` chooses between providers whose starters are on the
-      # classpath and whose protocols genuinely differ (Anthropic, Gemini).
-      # base-url swaps the endpoint behind the OpenAI-shaped client. The second
-      # is the cheaper path in every sense, and the one to reach for first.
-      #
-      # One caveat before switching on price alone: PRD §10 keeps candidate data
-      # in India, and a provider's inference region is part of that promise. The
-      # protocol being compatible does not make the jurisdiction acceptable.
-      base-url: ${OPENAI_BASE_URL:https://api.openai.com}
-
-    anthropic:
-      api-key: ${ANTHROPIC_API_KEY:}
-      base-url: ${ANTHROPIC_BASE_URL:https://api.anthropic.com}
+      chat:
+        options:
+          model: gpt-4o
+          temperature: 0.2
 
 # =============================================================================
 # Management / Actuator
@@ -113,39 +85,9 @@ management:
   endpoint:
     health:
       show-details: when-authorized
-      # Explicit, not auto-detected. Spring Boot enables the liveness and
-      # readiness health groups automatically only when it believes it is
-      # running on Kubernetes (it looks for KUBERNETES_SERVICE_HOST). Without
-      # them, /actuator/health/liveness and /actuator/health/readiness return
-      # 404 — and a probe treats 404 exactly as it treats 500: pod not ready,
-      # rollout never completes.
-      #
-      # deployment_web.tf points its readiness, liveness and startup probes at
-      # those paths and the whole drain mechanism in Arch v4.0 §5.2 depends on
-      # readiness failing independently of liveness. That is too much to rest
-      # on an environment-variable heuristic, so the groups are turned on
-      # unconditionally. It also means they can be exercised locally.
-      probes:
-        enabled: true
   metrics:
     tags:
       application: ${spring.application.name}
-
-  # ── Distributed tracing (PRD v2.1 §8) ─────────────────────────────────────
-  # Sampling defaults to 0.0: the bridge is on the classpath and populates
-  # traceId/spanId into the MDC — which is what makes the JSON logs
-  # correlatable — but nothing is exported until an environment opts in.
-  #
-  # Off by default because an OTLP exporter with no collector behind it retries
-  # on a schedule and logs a failure every time, which is a self-inflicted
-  # noise source in exactly the environments nobody is watching closely.
-  tracing:
-    enabled: true
-    sampling:
-      probability: ${TRACING_SAMPLE_RATE:0.0}
-  otlp:
-    tracing:
-      endpoint: ${OTLP_ENDPOINT:http://localhost:4318/v1/traces}
 
 # =============================================================================
 # Server
@@ -163,9 +105,8 @@ server:
 # Logging (base — profiles can override log levels)
 # =============================================================================
 logging:
-  # The console pattern lives in logback-spring.xml, not here — that file
-  # defines its own appenders, which makes logging.pattern.* inert. Deployed
-  # profiles emit one JSON object per line; local stays human-readable.
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{traceId:-}] %logger{36} - %msg%n"
   level:
     root:                           INFO
     com.interviewiq:                INFO
@@ -183,21 +124,15 @@ app:
     jwt:
       private-key-pem: ""
       public-key-pem: ""
-      access-token-expiration: 60m   # PRD v2.1 §7.1.1 — 60-minute access JWT
-      refresh-token-expiration: 7d   # PRD v2.1 §7.1.1 — 7-day refresh, HTTP-only cookie
+      access-token-expiration: 15m
+      refresh-token-expiration: 30d
     invite:
       secret: ""
-      expiration: 72h                # PRD v2.1 §7.1.2 — invite links valid 72 hours
+      expiration: 7d
     google:
       # OAuth 2.0 Client ID from Google Cloud Console.
       # Override per environment — inject in prod as APP_SECURITY_GOOGLE_CLIENT_ID.
       client-id: ""
-    cors:
-      # PRD v2.1 §7.1.3 — CORS restricted to the configured frontend origins.
-      # Empty here on purpose: localhost is declared in the local profile, and
-      # staging/prod inject APP_SECURITY_CORS_ALLOWED_ORIGINS. There is no
-      # wildcard fallback — an unlisted origin is refused.
-      allowed-origins: []
     login-attempt:
       max-failures: 5          # lock after this many failed logins from one IP
       window-duration: PT1M    # sliding window for counting failures
@@ -210,106 +145,13 @@ app:
       capacity: 3           # max burst for POST /api/v1/companies/register per IP
       refill-tokens: 3      # tokens added per refill window
       refill-duration: PT30M # 30-minute refill — 3 new companies per 30 min max
-  # ── Object storage — S3-compatible (PRD v2.1 §9.2, Arch v4.0 §3) ──────────
-  # One SDK plus an endpoint override runs on S3, GCS interop, Cloudflare R2,
-  # Spaces, MinIO or OCI. R2 charges zero egress, which is material because
-  # recording playback is the only meaningful egress this product generates.
-  storage:
-    endpoint: ""              # empty = real AWS S3; set for R2/GCS/Spaces/MinIO
-    region: ap-south-1        # R2 expects "auto"
-    bucket: ""
-    access-key: ""            # empty on AWS → default credential chain
-    secret-key: ""
-    path-style-access: true
+  aws:
+    region: ap-south-1
+    s3-bucket: ""
+    ses-from-address: noreply@interviewiq.ai
     use-local-stub: false
-    recording-retention-days: 7   # stated in the candidate consent notice (§7.5.3)
-
-  # ── Email — SMTP via JavaMailSender (§13.3) ───────────────────────────────
-  # Provider is a config change: Resend, Brevo, Postmark or SES-over-SMTP.
-  # Host and credentials live under spring.mail.*; domain verification with
-  # DKIM, SPF and DMARC is launch-blocking whichever provider is chosen.
-  mail:
-    from-address: noreply@interviewiq.in
-    from-name: InterviewIQ
-    use-local-stub: false
-
-    # ── Bounce / complaint callbacks (INTIQ-32, §13.3) ──────────────────────
-    # webhook-provider selects the payload parser: resend | postmark | brevo.
-    # Both this and webhook-secret are intentionally blank by default — the
-    # endpoint rejects rather than guessing. A default provider would parse
-    # real bounces with the wrong adapter and classify every one of them as
-    # "ignored": HTTP 200, no suppression, no error, nothing in the logs.
-    webhook-provider: ${MAIL_WEBHOOK_PROVIDER:}
-    webhook-secret: ${MAIL_WEBHOOK_SECRET:}
-    webhook-signature-header: ${MAIL_WEBHOOK_SIGNATURE_HEADER:X-Webhook-Signature}
-
-  # ── Worker tuning (PRD v2.1 §7.9) ─────────────────────────────────────────
-  # Every polling worker claims with FOR UPDATE SKIP LOCKED and an explicit
-  # batch limit, so each pod takes a distinct set of rows.
-  worker:
-    stale-claim-after: PT5M          # a claim older than this is treated as abandoned
-    evaluation-batch-size: 10
-    question-generation-batch-size: 10
-    extraction-batch-size: 20
-    expiry-batch-size: 100
-    promo-expiry-batch-size: 100
-    trace-payload-sweep-batch-size: 500
-    evaluation-concurrency: 4        # LLM calls in flight per pod (§7.5.5)
-
-  # ── Scheduler enablement (Implementation Architecture Decisions §4) ────────
-  # One image, two Kubernetes Deployments distinguished by Spring profile.
-  # The `web` profile turns this off and serves REST + WebSocket; the `worker`
-  # profile turns it on and serves nothing. Default true so a single-process
-  # local run behaves like the whole system.
-  schedulers:
-    enabled: true
-
-  # ── Interview room ────────────────────────────────────────────────────────
-  room:
-    timer-sweep:
-      # Runs on every pod including web pods, because only the pod holding a
-      # candidate's socket can push a timer warning to them.
-      enabled: true
-
-  # ── Candidate-driven scheduling (PRD v2.1 §7.4) ───────────────────────────
-  # No business hours, no blackout periods, no quiet-hours setting: availability
-  # is genuinely 24×7 and capacity is the only constraint. `invite-buffer` is
-  # deliberately absent — it was deleted in v2.1 and replaced by the readiness
-  # gate (§7.4.3).
-  scheduling:
-    bucket-capacity: 25              # concurrent interviews per 5-minute bucket
-    booking-horizon: P30D
-    minimum-notice: PT5M
-    question-generation-sla: PT30M   # alarmed if breached; typical is ~20 seconds
-    no-show-grace: PT15M             # generous on purpose — a missed slot costs a real applicant
-    first-reminder-lead: PT24H
-    second-reminder-lead: PT1H
-    sweep-batch-size: 100
-
-  # Auto-retirement thresholds (§7.5, INTIQ-93). Every number here is a starting
-  # guess — the right values are empirical, which is why they are configuration
-  # and why the console has a threshold preview.
-  question-quality:
-    minimum-sample: 10          # no rule applies below this; a distribution of three is not one
-    max-skip-rate: 0.4          # skipped this often → confusing, or unanswerable aloud
-    max-short-answer-rate: 0.5  # sub-5-word answers this often → closed, or too vague
-    min-score-variance: 0.5     # on a 0-10 scale this is ~0.7 SD: everyone lands within a point
-    candidate-flag-threshold: 3
-    sweep-cron: "0 0 3 * * *"   # daily; the distribution does not change between interviews
-
   billing:
-    session-cost-paise: 10000  # ₹100 per completed interview, flat across all duration tiers (PRD v2.1 §7.8.1)
-    minimum-top-up-paise: 10000      # ₹100 — was ₹500 before v2.1 (§7.8.1)
-    gst-percent: 18
-    low-balance-threshold-paise: 30000   # ₹300 banner + alert email
-    top-up-presets-paise: [10000, 50000, 100000, 250000, 500000, 1000000]
-    # Self-serve signup grant — ~3 free interviews, one per company (§7.8.3).
-    # "Nobody buys an AI interviewer they haven't watched run."
-    signup-grant:
-      enabled: true
-      amount-paise: 30000            # ₹300
-      valid-for: P60D
-      total-exposure-cap-paise: 5000000   # ₹50,000 platform-wide, monitored
+    session-cost-paise: 5000   # ₹50 per interview session (override per-environment)
     strand-cleanup:
       # One-off remediation for reservations stranded by the pre-fix SessionExpiryJob.
       # Keep false. Enable for exactly one deploy to drain stranded reservedPaise
@@ -318,47 +160,8 @@ app:
       enabled: false
   frontend:
     base-url: http://localhost:3000   # override in staging/prod
-  # ── AI: vendor and model per workflow (PRD v2.1 §9.1) ─────────────────────
-  # Each workflow gets its own ChatClient bean, injected by qualifier. Changing
-  # vendor is a config flip and a redeploy — which is also the failover plan.
-  #
-  # `vendor` is matched at runtime against the ChatModel beans actually present,
-  # so adding a provider is: starter in pom.xml + credentials under spring.ai +
-  # the name here. No Java change. Names are derived from the model class
-  # (OpenAiChatModel -> openai); vendor-aliases below covers the friendly ones.
-  #
-  # Confirm exact model strings against the provider price list at deploy time:
-  # the price tiers are stable, the labels are not. gpt-4o went stale here once,
-  # then gpt-5.4-nano did.
   ai:
-    question:
-      vendor: openai
-      model: gpt-5.6-luna        # nano tier: $0.10/$0.60 per MTok, ~Rs.0.20/interview
-      temperature: 0.4           # some variety across candidates for the same JD
-    followup:
-      vendor: openai
-      model: gpt-5.6-luna        # trivial real-time classification, latency-sensitive
-      temperature: 0.2
-    evaluation:
-      # "Undecided by design" (§13.1) — Haiku is the blind-choice default because
-      # calibration matters more than price. After the Aug-2026 reprice the two
-      # candidates are within Rs.0.25/interview of each other ($1/$5 vs $1/$6),
-      # so decide on measured score-to-hire correlation. There is no price tiebreak.
-      vendor: anthropic
-      model: claude-haiku-4-5
-      temperature: 0.1           # the same transcript must score the same twice
-    # Shadow mode: score with both, serve one, log both, for the first ~50
-    # interviews (~Rs.900 for the whole experiment).
-    shadow-evaluation: false
-    shadow-vendor: openai
-    shadow-model: gpt-5.6-terra
-    # Friendly name -> derived vendor key. Additive: these merge into the
-    # defaults in AiWorkflowProperties rather than replacing them. Override only
-    # to teach the app a provider nobody anticipated.
-    # vendor-aliases:
-    #   google: vertexaigemini
-    prompt-caching: true         # ~90% off question-generation input on a 200-candidate opening
-    evaluation-max-attempts: 3   # then the session is flagged ERROR for manual review
+    evaluation-max-attempts: 3        # max LLM retries for the evaluation pipeline
   razorpay:
     key-id: ""
     key-secret: ""

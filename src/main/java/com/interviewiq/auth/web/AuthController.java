@@ -12,8 +12,6 @@ import com.interviewiq.auth.dto.VerifyEmailRequest;
 import com.interviewiq.auth.service.AuthService;
 import com.interviewiq.shared.dto.ApiResponse;
 import jakarta.servlet.http.HttpServletRequest;
-import com.interviewiq.shared.exception.AuthorizationException;
-import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -39,11 +37,9 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
     private final AuthService authService;
-    private final RefreshTokenCookie refreshTokenCookie;
 
-    public AuthController(AuthService authService, RefreshTokenCookie refreshTokenCookie) {
-        this.authService        = authService;
-        this.refreshTokenCookie = refreshTokenCookie;
+    public AuthController(AuthService authService) {
+        this.authService = authService;
     }
 
     /**
@@ -67,9 +63,8 @@ public class AuthController {
     @PostMapping("/verify-email")
     public ApiResponse<AuthResponse> verifyEmail(
             @PathVariable String slug,
-            @Valid @RequestBody VerifyEmailRequest request,
-            HttpServletResponse httpResponse) {
-        return issue(authService.verifyEmail(slug, request), httpResponse);
+            @Valid @RequestBody VerifyEmailRequest request) {
+        return ApiResponse.ok(authService.verifyEmail(slug, request));
     }
 
     /**
@@ -96,10 +91,9 @@ public class AuthController {
     public ApiResponse<AuthResponse> login(
             @PathVariable String slug,
             @Valid @RequestBody LoginRequest request,
-            HttpServletRequest httpRequest,
-            HttpServletResponse httpResponse) {
+            HttpServletRequest httpRequest) {
         String clientIp = resolveClientIp(httpRequest);
-        return issue(authService.login(slug, request, clientIp), httpResponse);
+        return ApiResponse.ok(authService.login(slug, request, clientIp));
     }
 
     private static String resolveClientIp(HttpServletRequest request) {
@@ -114,26 +108,13 @@ public class AuthController {
      * POST /api/v1/{slug}/auth/refresh
      * Rotates the refresh token and returns a new token pair.
      */
-    /**
-     * Rotates the refresh token.
-     *
-     * <p>The incoming token is read from the HTTP-only cookie, never the body
-     * (PRD v2.1 §7.1.1) — the SPA cannot read it, which is the entire point, so
-     * it could not send one even if it wanted to. The rotated token goes back
-     * out the same way.
-     */
     @PostMapping("/refresh")
     public ApiResponse<AuthResponse> refresh(
             @PathVariable String slug,
-            HttpServletRequest httpRequest,
-            HttpServletResponse httpResponse) {
-
-        String token = refreshTokenCookie.read(httpRequest)
-                .orElseThrow(() -> new AuthorizationException("No active session."));
-
+            @Valid @RequestBody RefreshRequest request) {
         // Refresh is stateless with respect to slug — company context comes from
         // the stored refresh token's userId. Slug parameter kept for URL symmetry.
-        return issue(authService.refresh(new RefreshRequest(token)), httpResponse);
+        return ApiResponse.ok(authService.refresh(request));
     }
 
     /**
@@ -144,26 +125,8 @@ public class AuthController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void logout(
             @PathVariable String slug,
-            HttpServletRequest httpRequest,
-            HttpServletResponse httpResponse) {
-
-        // Clear the cookie whether or not a token was present: a logout that
-        // leaves the cookie behind is worse than one that had nothing to revoke.
-        refreshTokenCookie.read(httpRequest)
-                .ifPresent(token -> authService.logout(new LogoutRequest(token)));
-        refreshTokenCookie.clear(httpResponse);
-    }
-
-    /**
-     * Sets the refresh cookie and returns the body without the token in it.
-     *
-     * <p>Every path that mints a token pair goes through here, so there is one
-     * place responsible for keeping the refresh token out of the response body.
-     */
-    private ApiResponse<AuthResponse> issue(AuthResponse.WithRefreshToken issued,
-                                            HttpServletResponse httpResponse) {
-        refreshTokenCookie.set(httpResponse, issued.refreshToken());
-        return ApiResponse.ok(issued.response());
+            @Valid @RequestBody LogoutRequest request) {
+        authService.logout(request);
     }
 
     /**

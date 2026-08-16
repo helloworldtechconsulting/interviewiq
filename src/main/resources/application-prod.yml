@@ -19,23 +19,6 @@
 
 spring:
 
-  # ── SMTP transport (Resend / Brevo / Postmark / SES-over-SMTP) ─────────────
-  mail:
-    host:     ${SMTP_HOST}
-    port:     ${SMTP_PORT:587}
-    username: ${SMTP_USERNAME}
-    password: ${SMTP_PASSWORD}
-    properties:
-      mail:
-        smtp:
-          auth: true
-          starttls:
-            enable: true
-            required: true
-          connectiontimeout: 5000
-          timeout: 5000
-          writetimeout: 5000
-
   # ── Database ───────────────────────────────────────────────────────────────
   datasource:
     url:      jdbc:postgresql://${DB_HOST}:${DB_PORT:5432}/${DB_NAME}
@@ -43,7 +26,7 @@ spring:
     password: ${DB_PASSWORD}
     hikari:
       pool-name:            InterviewIQ-Prod-Pool
-      maximum-pool-size:    10   # PRD v2.1 §8 — 10 per pod; 6 web + 4 worker stays inside a small managed instance
+      maximum-pool-size:    20
       minimum-idle:         5
       idle-timeout:         600000   # 10 min
       max-lifetime:         1800000  # 30 min
@@ -61,8 +44,6 @@ spring:
   ai:
     openai:
       api-key: ${OPENAI_API_KEY}
-    anthropic:
-      api-key: ${ANTHROPIC_API_KEY}
 
   # ── JPA ───────────────────────────────────────────────────────────────────
   jpa:
@@ -107,39 +88,22 @@ app:
       # RSA keys injected as env vars — REQUIRED in production
       private-key-pem: ${APP_SECURITY_JWT_PRIVATE_KEY_PEM}
       public-key-pem:  ${APP_SECURITY_JWT_PUBLIC_KEY_PEM}
-      access-token-expiration: 60m
-      refresh-token-expiration: 7d
+      access-token-expiration: 15m
+      refresh-token-expiration: 30d
     invite:
       # HMAC secret — REQUIRED in production; min 32 characters
       secret: ${APP_SECURITY_INVITE_SECRET}
-      expiration: 72h
-    cors:
-      # Comma-separated exact origins, e.g. https://app.interviewiq.in
-      # REQUIRED — the SPA is served from a different origin than the API.
-      allowed-origins: ${APP_SECURITY_CORS_ALLOWED_ORIGINS}
-
-  frontend:
-    # Every emailed link (invite, booking confirmation, password reset) is built
-    # from this. REQUIRED in production — a wrong value silently emails dead links.
-    base-url: ${APP_FRONTEND_BASE_URL}
+      expiration: 7d
 
   razorpay:
     key-id:     ${RAZORPAY_KEY_ID}
     key-secret: ${RAZORPAY_KEY_SECRET}
 
-  storage:
-    # Endpoint override selects the provider. Empty = AWS S3; set to the R2 /
-    # GCS-interop / Spaces / MinIO endpoint to run anywhere else. Injected by the
-    # workload Terraform module from the platform module's output contract.
-    endpoint:    ${OBJECT_STORAGE_ENDPOINT:}
-    region:      ${OBJECT_STORAGE_REGION:ap-south-1}
-    bucket:      ${OBJECT_STORAGE_BUCKET}
-    access-key:  ${OBJECT_STORAGE_ACCESS_KEY:}
-    secret-key:  ${OBJECT_STORAGE_SECRET_KEY:}
-    path-style-access: true
-    use-local-stub: false
+  recall:
+    api-key:         ${RECALL_API_KEY}
+    webhook-secret:  ${RECALL_WEBHOOK_SECRET}
 
-  mail:
-    from-address: ${MAIL_FROM_ADDRESS}
-    from-name:    ${MAIL_FROM_NAME:InterviewIQ}
+  aws:
+    region:     ${AWS_REGION:ap-south-1}
+    s3-bucket:  ${AWS_S3_BUCKET}
     use-local-stub: false

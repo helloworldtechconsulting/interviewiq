@@ -3,8 +3,6 @@ package com.interviewiq.auth.config;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * Strongly-typed configuration for all security concerns:
@@ -31,13 +29,11 @@ public class SecurityProperties {
     private final Invite       invite       = new Invite();
     private final Google       google       = new Google();
     private final LoginAttempt loginAttempt = new LoginAttempt();
-    private final Cors         cors         = new Cors();
 
     public Jwt          getJwt()          { return jwt; }
     public Invite       getInvite()       { return invite; }
     public Google       getGoogle()       { return google; }
     public LoginAttempt getLoginAttempt() { return loginAttempt; }
-    public Cors         getCors()         { return cors; }
 
     // =========================================================================
     // JWT (RS256 asymmetric — employer access tokens)
@@ -114,60 +110,6 @@ public class SecurityProperties {
 
         public String getClientId() { return clientId; }
         public void setClientId(String clientId) { this.clientId = clientId; }
-    }
-
-    // =========================================================================
-    // CORS (PRD v2.1 §7.1.3 — a permissive or absent policy is a launch blocker)
-    // =========================================================================
-
-    /**
-     * Cross-origin policy for the browser SPA and the candidate interview room.
-     *
-     * <p>PRD v2.1 §7.1.3 requires CORS to be <em>restricted to the configured
-     * frontend origins</em>. There is deliberately no wildcard support: origins
-     * are an explicit allow-list, and an empty list means no cross-origin request
-     * is permitted at all. Credentials are allowed because the refresh token
-     * travels in an HTTP-only cookie, and the CORS spec forbids pairing
-     * {@code allowCredentials} with an {@code *} origin — so the allow-list is a
-     * correctness requirement, not only a hardening one.
-     */
-    public static class Cors {
-
-        /**
-         * Exact origins permitted to call the API, e.g.
-         * {@code https://app.interviewiq.in}. Scheme, host and port must all match.
-         * In production: inject as {@code APP_SECURITY_CORS_ALLOWED_ORIGINS}.
-         */
-        private List<String> allowedOrigins = new ArrayList<>();
-
-        /** HTTP methods permitted cross-origin. */
-        private List<String> allowedMethods =
-                new ArrayList<>(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-
-        /** Request headers permitted cross-origin. */
-        private List<String> allowedHeaders =
-                new ArrayList<>(List.of("Authorization", "Content-Type", "X-Requested-With"));
-
-        /** Response headers exposed to the browser. */
-        private List<String> exposedHeaders = new ArrayList<>();
-
-        /** How long a browser may cache the preflight response. */
-        private Duration maxAge = Duration.ofHours(1);
-
-        public List<String> getAllowedOrigins() { return allowedOrigins; }
-        public void setAllowedOrigins(List<String> allowedOrigins) { this.allowedOrigins = allowedOrigins; }
-
-        public List<String> getAllowedMethods() { return allowedMethods; }
-        public void setAllowedMethods(List<String> allowedMethods) { this.allowedMethods = allowedMethods; }
-
-        public List<String> getAllowedHeaders() { return allowedHeaders; }
-        public void setAllowedHeaders(List<String> allowedHeaders) { this.allowedHeaders = allowedHeaders; }
-
-        public List<String> getExposedHeaders() { return exposedHeaders; }
-        public void setExposedHeaders(List<String> exposedHeaders) { this.exposedHeaders = exposedHeaders; }
-
-        public Duration getMaxAge() { return maxAge; }
-        public void setMaxAge(Duration maxAge) { this.maxAge = maxAge; }
     }
 
     public static class LoginAttempt {

@@ -73,29 +73,6 @@ public class Candidate {
     @Column(nullable = false)
     private boolean googleVerified = false;
 
-    /**
-     * Opaque identifier substituted for candidate PII in every outbound LLM
-     * payload (PRD v2.1 §7.5.6). Name, email and phone are stripped and this is
-     * passed instead; identity is re-attached locally when the report is
-     * persisted. The evaluation model does not need to know who the candidate is
-     * in order to score an answer about Spring Boot.
-     */
-    @Column(nullable = false, unique = true, updatable = false, length = 64)
-    private String candidateRef;
-
-    /**
-     * Mints an opaque reference. Deliberately derived from a random UUID rather
-     * than from the candidate's email or id: anything derivable from PII, or
-     * reversible back to a database row by an outside party, would defeat the
-     * point of redacting the payload in the first place.
-     */
-    private static String newCandidateRef() {
-        return "cand_" + UUID.randomUUID().toString().replace("-", "");
-    }
-
-    /** Set when the candidate arrived through a bulk CSV import (§7.3.1). */
-    private UUID importBatchId;
-
     @Column(nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 
@@ -107,10 +84,6 @@ public class Candidate {
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
         if (createdAt == null) createdAt = now;
         if (updatedAt == null) updatedAt = now;
-        // Minted here rather than in the service so that no code path can create
-        // a candidate without one — the reference is what every LLM payload
-        // carries in place of the candidate's identity.
-        if (candidateRef == null) candidateRef = newCandidateRef();
     }
 
     @PreUpdate
@@ -163,10 +136,4 @@ public class Candidate {
     public String toString() {
         return "Candidate{id=" + id + ", email='" + email + "', jobOpeningId=" + jobOpeningId + "}";
     }
-
-    public String getCandidateRef() { return candidateRef; }
-    public void setCandidateRef(String candidateRef) { this.candidateRef = candidateRef; }
-
-    public UUID getImportBatchId() { return importBatchId; }
-    public void setImportBatchId(UUID importBatchId) { this.importBatchId = importBatchId; }
 }

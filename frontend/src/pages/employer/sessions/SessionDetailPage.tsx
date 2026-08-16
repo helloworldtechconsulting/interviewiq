@@ -1,7 +1,7 @@
 // =============================================================================
 // SessionDetailPage.tsx
 //
-// Shows session status, cancel, and (when COMPLETED) the full
+// Shows session status, set meet URL, cancel, and (when COMPLETED) the full
 // AI evaluation: radar chart, overall score, recommendation, strengths,
 // improvements, and per-question breakdown.
 // =============================================================================
@@ -9,6 +9,9 @@
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import { toast } from "sonner";
 import {
   RadarChart,
@@ -19,6 +22,7 @@ import {
 } from "recharts";
 import {
   ArrowLeft,
+  Link2,
   XCircle,
   Loader2,
   CheckCircle2,
@@ -33,13 +37,22 @@ import { queryKeys } from "@/lib/queryKeys";
 import { AppError } from "@/api/client";
 import { PageHeader } from "@/components/common/PageHeader";
 import { StatusBadge } from "@/components/common/StatusBadge";
-import { EvidencePanel } from "./EvidencePanel";
 import { EmptyState } from "@/components/common/EmptyState";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { Badge } from "@/components/ui/badge";
 import { cn, formatDateTime } from "@/lib/utils";
 import type { EvaluationQuestion } from "@/types";
+
+// ── Set meet URL schema ───────────────────────────────────────────────────────
+
+const meetUrlSchema = z.object({
+  meetUrl: z.string().url("Please enter a valid meeting URL"),
+});
+type MeetUrlForm = z.infer<typeof meetUrlSchema>;
 
 // ── Recommendation badge ──────────────────────────────────────────────────────
 
@@ -150,12 +163,7 @@ export function SessionDetailPage() {
     // Poll every 10s while session is running so status updates live
     refetchInterval: (query) => {
       const status = query.state.data?.status;
-      // Poll through EVALUATING too — the report lands without any action from
-      // the recruiter, and the soft target is ~5 minutes (§7.5.5).
-      return status === "INVITED" || status === "SCHEDULED"
-        || status === "IN_PROGRESS" || status === "EVALUATING"
-        ? 10_000
-        : false;
+      return status === "INVITED" || status === "STARTED" ? 10_000 : false;
     },
   });
 
@@ -164,6 +172,33 @@ export function SessionDetailPage() {
     queryFn: () => sessionsApi.getEvaluation(sessionId!),
     enabled: session?.status === "COMPLETED",
     retry: false,
+  });
+
+  // ── Meet URL form ──────────────────────────────────────────────────────────
+
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+  } = useForm<MeetUrlForm>({
+    resolver: zodResolver(meetUrlSchema),
+    defaultValues: { meetUrl: session?.googleMeetUrl ?? "" },
+  });
+
+  const meetUrlMutation = useMutation({
+    mutationFn: (data: MeetUrlForm) =>
+      sessionsApi.setMeetUrl(sessionId!, { meetUrl: data.meetUrl }),
+    onSuccess() {
+      toast.success("Meeting URL saved.");
+      void qc.invalidateQueries({
+        queryKey: queryKeys.sessions.detail(sessionId!),
+      });
+    },
+    onError(error) {
+      toast.error(
+        error instanceof AppError ? error.message : "Could not save URL.",
+      );
+    },
   });
 
   const cancelMutation = useMutation({
@@ -214,9 +249,8 @@ export function SessionDetailPage() {
       ]
     : [];
 
-  // Cancellable before the interview starts. §7.4.4: valid from INVITED or
-  // SCHEDULED — once IN_PROGRESS the candidate is mid-interview.
-  const canCancel = session.status === "INVITED" || session.status === "SCHEDULED";
+  const canCancel = session.status === "INVITED" || session.status === "STARTED";
+  const canSetUrl = session.status === "INVITED";
 
   return (
     <div className="space-y-6">
@@ -306,10 +340,81 @@ export function SessionDetailPage() {
                     </dd>
                   </div>
                 )}
+                {session.recallBotId && (
+                  <div className="flex items-start justify-between gap-2">
+                    <dt className="text-muted-foreground">Bot ID</dt>
+                    <dd className="break-all text-right font-mono text-xs">
+                      {session.recallBotId}
+                    </dd>
+                  </div>
+                )}
               </dl>
             </CardContent>
           </Card>
 
+          {/* Meet URL */}
+          {canSetUrl && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Meeting Link</CardTitle>
+              </CardHeader>
+              <Separator />
+              <CardContent className="pt-4">
+                <p className="mb-3 text-sm text-muted-foreground">
+                  Paste your Google Meet, Zoom, or Teams link. The AI bot will
+                  join this URL at the scheduled time.
+                </p>
+                <form
+                  onSubmit={handleSubmit((d) => meetUrlMutation.mutate(d))}
+                  className="space-y-2"
+                >
+                  <Label htmlFor="meetUrl">Meeting URL</Label>
+                  <Input
+                    id="meetUrl"
+                    type="url"
+                    placeholder="https://meet.google.com/..."
+                    defaultValue={session.googleMeetUrl ?? ""}
+                    {...register("meetUrl")}
+                  />
+                  {errors.meetUrl && (
+                    <p className="text-xs text-destructive">
+                      {errors.meetUrl.message}
+                    </p>
+                  )}
+                  <Button
+                    type="submit"
+                    size="sm"
+                    className="w-full"
+                    disabled={meetUrlMutation.isPending}
+                  >
+                    {meetUrlMutation.isPending ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Link2 className="mr-2 h-4 w-4" />
+                    )}
+                    Save URL
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+          )}
+
+          {session.googleMeetUrl && !canSetUrl && (
+            <Card>
+              <CardContent className="pt-4">
+                <p className="text-xs text-muted-foreground">Meeting URL</p>
+                <a
+                  href={session.googleMeetUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-1 flex items-center gap-1 break-all text-sm text-primary hover:underline"
+                >
+                  <Link2 className="h-3.5 w-3.5 shrink-0" />
+                  {session.googleMeetUrl}
+                </a>
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         {/* ── Evaluation ────────────────────────────────────────────────────── */}
@@ -453,28 +558,8 @@ export function SessionDetailPage() {
                 </Card>
               </div>
 
-              {/* ── Per-question narrative evidence (§7.6) ───────────────────
-                  Preferred over the plain question breakdown wherever it is
-                  present: it is what makes a score actionable, and what the
-                  PRD requires a report to carry. The older layout stays as a
-                  fallback for reports generated before v2.1. */}
-              {evaluation.evidence && (
-                <EvidencePanel
-                  evidence={evaluation.evidence}
-                  answers={evaluation.answers ?? []}
-                  partial={evaluation.partial}
-                />
-              )}
-
-              <ProctoringPanel sessionId={sessionId!} />
-
-              <EmployerNotesPanel
-                sessionId={sessionId!}
-                initialNotes={evaluation.employerNotes ?? ""}
-              />
-
-              {/* Question breakdown — legacy reports only */}
-              {!evaluation.evidence && evaluation.questions.length > 0 && (
+              {/* Question breakdown */}
+              {evaluation.questions.length > 0 && (
                 <Card>
                   <CardHeader>
                     <CardTitle className="text-base">
@@ -531,13 +616,13 @@ export function SessionDetailPage() {
                 <p className="mt-1 max-w-xs text-sm text-muted-foreground">
                   {session.status === "INVITED"
                     ? "The evaluation report will appear here once the interview is completed."
-                    : session.status === "IN_PROGRESS"
+                    : session.status === "STARTED"
                     ? "The interview is in progress. Check back once it completes."
                     : "No evaluation is available for this session."}
                 </p>
 
                 {/* Live polling indicator for in-progress */}
-                {(session.status === "INVITED" || session.status === "IN_PROGRESS") && (
+                {(session.status === "INVITED" || session.status === "STARTED") && (
                   <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground">
                     <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-primary" />
                     Auto-refreshing every 10s
@@ -549,127 +634,5 @@ export function SessionDetailPage() {
         </div>
       </div>
     </div>
-  );
-}
-
-// =============================================================================
-// Proctoring (INTIQ-29)
-// =============================================================================
-
-/**
- * What the browser noticed during the interview.
- *
- * Rendered as a plain chronological list with no severity, no score and no
- * verdict. That is a deliberate refusal: these signals are weak individually —
- * a tab switch might be someone checking the time, a camera drop might be a
- * loose cable — and turning them into "suspected cheating" would be the product
- * making an accusation about a person, with their job at stake, on evidence
- * that does not support one. The recruiter sees what happened and decides.
- *
- * Chronological rather than grouped by type, because three tab switches in the
- * last two minutes reads very differently from three spread across an hour, and
- * only the ordering shows that.
- */
-function ProctoringPanel({ sessionId }: { sessionId: string }) {
-  const { data: events = [], isLoading } = useQuery({
-    queryKey: ["sessions", sessionId, "proctoring"],
-    queryFn: () => sessionsApi.getProctoringEvents(sessionId),
-  });
-
-  if (isLoading || events.length === 0) {
-    return null;
-  }
-
-  return (
-    <Card className="print-keep-together">
-      <CardHeader>
-        <CardTitle className="text-base">During the interview</CardTitle>
-      </CardHeader>
-      <Separator />
-      <CardContent className="space-y-2 pt-4">
-        <p className="text-sm text-muted-foreground">
-          Things the browser noticed. These are observations, not conclusions —
-          a tab switch might be someone checking the time.
-        </p>
-        {events.map((e) => (
-          <div key={e.id} className="flex items-center gap-3 rounded-md border p-2 text-sm">
-            <span className="font-medium">
-              {e.eventType === "TAB_SWITCH" ? "Switched away from the tab" : "Camera turned off"}
-            </span>
-            <span className="ml-auto text-xs text-muted-foreground">
-              {new Date(e.occurredAt).toLocaleTimeString()}
-            </span>
-          </div>
-        ))}
-      </CardContent>
-    </Card>
-  );
-}
-
-// =============================================================================
-// Employer notes (INTIQ-29)
-// =============================================================================
-
-/**
- * The recruiter's own notes on a report.
- *
- * Never sent to a model. These are the recruiter's words about a candidate, and
- * feeding them back into scoring would let an opinion formed after the
- * interview influence the evaluation of it — which is exactly the contamination
- * an advisory score is supposed to avoid.
- */
-function EmployerNotesPanel({
-  sessionId,
-  initialNotes,
-}: {
-  sessionId: string;
-  initialNotes: string;
-}) {
-  const [notes, setNotes] = useState(initialNotes);
-  const [saved, setSaved] = useState(true);
-
-  const mutation = useMutation({
-    mutationFn: () => sessionsApi.saveNotes(sessionId, notes),
-    onSuccess() {
-      setSaved(true);
-      toast.success("Notes saved.");
-    },
-    onError() {
-      toast.error("Could not save your notes.");
-    },
-  });
-
-  return (
-    <Card className="print-keep-together">
-      <CardHeader>
-        <CardTitle className="text-base">Your notes</CardTitle>
-      </CardHeader>
-      <Separator />
-      <CardContent className="space-y-3 pt-4">
-        <textarea
-          value={notes}
-          onChange={(e) => {
-            setNotes(e.target.value);
-            setSaved(false);
-          }}
-          rows={4}
-          placeholder="What you thought, what to probe in round two, who else should see this…"
-          className="w-full rounded-md border bg-background p-3 text-sm"
-        />
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-xs text-muted-foreground">
-            Visible to your team, never to the candidate, and never used in scoring.
-          </p>
-          <Button
-            size="sm"
-            className="no-print"
-            onClick={() => mutation.mutate()}
-            disabled={saved || mutation.isPending}
-          >
-            {saved ? "Saved" : "Save notes"}
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
   );
 }

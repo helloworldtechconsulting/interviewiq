@@ -104,6 +104,7 @@ public record ApiErrorResponse(
         public static final String EXTERNAL_SERVICE_ERROR    = "EXTERNAL_SERVICE_ERROR";
         public static final String AI_SERVICE_ERROR          = "AI_SERVICE_ERROR";
         public static final String PAYMENT_SERVICE_ERROR     = "PAYMENT_SERVICE_ERROR";
+        public static final String BOT_SERVICE_ERROR         = "BOT_SERVICE_ERROR";
         public static final String STORAGE_SERVICE_ERROR     = "STORAGE_SERVICE_ERROR";
 
         // 500

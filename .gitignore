@@ -12,25 +12,6 @@
 private.pem
 public.pem
 
-# ── Terraform ─────────────────────────────────────────────────────────────────
-# State files carry every value the provisioner saw in plaintext — database
-# passwords, object-storage secret keys. *.tfvars is where those values are
-# typed in the first place. Neither belongs in git; state lives in the chosen
-# cloud's object storage with a lock table (Architecture v4.0 §4).
-# (.terraform.lock.hcl is deliberately NOT ignored — provider version pins
-# belong in git so every apply resolves the same versions.)
-.terraform/
-*.tfstate
-*.tfstate.*
-*.tfvars
-!*.tfvars.example
-crash.log
-crash.*.log
-override.tf
-override.tf.json
-*_override.tf
-*_override.tf.json
-
 # ── Maven build output ────────────────────────────────────────────────────────
 target/
 !.mvn/wrapper/maven-wrapper.jar
@@ -76,8 +57,3 @@ logs/
 
 # ── Spring Boot devtools restart trigger ─────────────────────────────────────
 .spring-boot-devtools.properties
-
-# ── Load test ─────────────────────────────────────────────────────────────────
-# Seeded invite tokens authenticate as a candidate. A committed one is a
-# credential in the repository.
-src/gatling/resources/load/session-tokens.csv

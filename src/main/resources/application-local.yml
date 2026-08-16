@@ -41,15 +41,11 @@ spring:
     clean-on-validation-error: true
     clean-disabled: false
 
-  # ── Spring AI — stub keys; no real provider calls in local smoke test ─────
-  #   Both providers need a key at startup because both starters are on the
-  #   classpath (vendor is per-workflow config, not a build-time choice).
-  #   Replace with real keys when testing the AI pipeline locally.
+  # ── Spring AI — stub key; no real OpenAI calls in local smoke test ─────────
+  #   Replace with a real key when testing the AI pipeline locally.
   ai:
     openai:
       api-key: sk-local-dev-stub-key-replace-for-ai-testing
-    anthropic:
-      api-key: sk-ant-local-dev-stub-key-replace-for-ai-testing
 
   # ── JPA — verbose SQL for development debugging ───────────────────────────
   jpa:
@@ -63,7 +59,7 @@ spring:
 # =============================================================================
 logging:
   file:
-    name: backend-current.log
+    name: C:/Users/Nural/Claude-Project/backend-current.log
   level:
     com.interviewiq:               DEBUG
     org.flywaydb:                  DEBUG
@@ -85,11 +81,6 @@ app:
       refresh-token-expiration: 7d
     invite:
       secret: ""      # auto-generate locally
-    cors:
-      # The Vite dev server. Explicit even locally — there is no wildcard path.
-      allowed-origins:
-        - http://localhost:3000
-        - http://localhost:5173
 
   # Razorpay — test mode key prefix; replace with live key in prod
   razorpay:

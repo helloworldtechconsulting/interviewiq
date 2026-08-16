@@ -62,15 +62,6 @@ public class Company {
     @Column(name = "gst_number", length = 20)
     private String gstNumber;
 
-    /**
-     * When the self-serve signup promotional grant was applied — roughly three
-     * free interviews, one per company, on email verification (PRD v2.1 §7.8.3).
-     * Non-null means the grant is spent and cannot be issued again; the
-     * email-domain and payment-instrument abuse guards sit in front of this
-     * check, not instead of it.
-     */
-    private OffsetDateTime promoGrantAppliedAt;
-
     @Column(nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 
@@ -128,10 +119,4 @@ public class Company {
     public String toString() {
         return "Company{id=" + id + ", slug='" + slug + "'}";
     }
-
-    public OffsetDateTime getPromoGrantAppliedAt() { return promoGrantAppliedAt; }
-    public void setPromoGrantAppliedAt(OffsetDateTime promoGrantAppliedAt) { this.promoGrantAppliedAt = promoGrantAppliedAt; }
-
-    /** Whether this company has already received its one-per-company signup grant. */
-    public boolean hasReceivedSignupGrant() { return promoGrantAppliedAt != null; }
 }
