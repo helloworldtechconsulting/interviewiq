@@ -40,14 +40,21 @@ public interface CandidateRepository extends JpaRepository<Candidate, UUID> {
      *
      * <p>{@code search} matches name or email; all three parameters are nullable.
      */
+    /*
+     * CAST(:search AS String) for the same reason as JobOpeningRepository.search:
+     * a null bind used with LIKE is untyped, PostgreSQL guesses bytea, and the
+     * query fails with "operator does not exist: text ~~ bytea". Null search is
+     * the default on GET /api/v1/candidates, so this was a 500 on the candidates
+     * page's first request.
+     */
     @Query("""
            SELECT c FROM Candidate c
            WHERE c.companyId = :companyId
              AND (:jobOpeningId IS NULL OR c.jobOpeningId = :jobOpeningId)
              AND (:status IS NULL OR c.resumeExtractionStatus = :status)
-             AND (:search IS NULL
-                  OR LOWER(c.fullName) LIKE CONCAT('%', :search, '%')
-                  OR LOWER(c.email)    LIKE CONCAT('%', :search, '%'))
+             AND (CAST(:search AS String) IS NULL
+                  OR LOWER(c.fullName) LIKE CONCAT('%', CAST(:search AS String), '%')
+                  OR LOWER(c.email)    LIKE CONCAT('%', CAST(:search AS String), '%'))
            ORDER BY c.createdAt DESC
            """)
     Page<Candidate> search(@Param("companyId") UUID companyId,
